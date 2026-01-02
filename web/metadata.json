@@ -1,0 +1,7 @@
+{
+  "name": "Senate Votes & Proceedings",
+  "description": "An institutional, minimal mobile application for Senate clerks and staff to record, review, and manage official Votes & Proceedings documents, featuring AI-powered summaries and document scanning.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
