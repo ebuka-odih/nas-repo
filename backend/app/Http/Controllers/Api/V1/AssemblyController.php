@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Repositories\AssemblyRepository;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class AssemblyController extends Controller
 {
@@ -16,9 +17,11 @@ class AssemblyController extends Controller
      * Get all assemblies
      * GET /api/v1/assemblies
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $assemblies = $this->repository->getActive();
+        // Allow getting all assemblies or just active ones
+        $all = $request->boolean('all', false);
+        $assemblies = $all ? $this->repository->getAll() : $this->repository->getActive();
 
         return response()->json([
             'success' => true,

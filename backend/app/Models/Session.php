@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Session extends Model
 {
+    protected $table = 'legislative_sessions';
+
     protected $fillable = [
         'assembly_id',
         'name',

@@ -24,6 +24,16 @@ class SessionRepository
     {
         return Session::findOrFail($id);
     }
+
+    /**
+     * Get all sessions
+     */
+    public function getAll(): Collection
+    {
+        return Session::with('assembly')
+            ->orderBy('order')
+            ->get();
+    }
 }
 
 

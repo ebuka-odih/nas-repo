@@ -15,6 +15,7 @@ class Document extends Model
         'mime_type',
         'file_size',
         'metadata',
+        'extracted_text',
         'is_read_only',
     ];
 

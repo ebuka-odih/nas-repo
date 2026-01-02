@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\DTOs\CreateSittingDTO;
 use App\Http\Controllers\Controller;
+use App\Http\Resources\SittingResource;
 use App\Repositories\SittingRepository;
 use App\Services\SittingService;
 use Illuminate\Http\JsonResponse;
@@ -30,12 +31,22 @@ class SittingController extends Controller
             'status' => $request->input('status'),
         ];
 
-        $sittings = $this->repository->list($filters, $request->input('per_page', 15));
+        $perPage = $request->input('per_page', 100); // Increased default for frontend list view
+        $sittings = $this->repository->list($filters, $perPage);
+        
+        // Load relationships for formatting
+        $sittings->load(['session.assembly', 'agendaItems', 'bills']);
 
         return response()->json([
             'success' => true,
             'message' => 'Sittings retrieved successfully',
-            'data' => $sittings,
+            'data' => SittingResource::collection($sittings->items()),
+            'meta' => [
+                'current_page' => $sittings->currentPage(),
+                'last_page' => $sittings->lastPage(),
+                'per_page' => $sittings->perPage(),
+                'total' => $sittings->total(),
+            ],
         ]);
     }
 
@@ -46,7 +57,7 @@ class SittingController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'session_id' => 'required|exists:sessions,id',
+            'session_id' => 'required|exists:legislative_sessions,id',
             'date' => 'required|date',
             'time_opened' => 'nullable|date_format:H:i',
         ]);

@@ -26,4 +26,19 @@ class SessionController extends Controller
             'data' => $sessions,
         ]);
     }
+
+    /**
+     * Get all sessions
+     * GET /api/v1/sessions
+     */
+    public function all(): JsonResponse
+    {
+        $sessions = $this->repository->getAll();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'All sessions retrieved successfully',
+            'data' => $sessions,
+        ]);
+    }
 }

@@ -29,6 +29,7 @@ Route::prefix('v1')->group(function () {
 
         // Context endpoints
         Route::get('/assemblies', [AssemblyController::class, 'index']);
+        Route::get('/sessions', [SessionController::class, 'all']);
         Route::get('/assemblies/{assembly_id}/sessions', [SessionController::class, 'index']);
 
         // Sittings endpoints
@@ -52,6 +53,8 @@ Route::prefix('v1')->group(function () {
             ->middleware(['role:clerk,admin', 'draft.editable']);
 
         // Documents endpoints
+        // Documents endpoints
+        Route::post('/documents/process', [DocumentController::class, 'process']);
         Route::post('/sittings/{id}/documents', [DocumentController::class, 'store'])
             ->middleware(['role:clerk,admin', 'draft.editable']);
         Route::get('/sittings/{id}/document/html', [DocumentController::class, 'html']);

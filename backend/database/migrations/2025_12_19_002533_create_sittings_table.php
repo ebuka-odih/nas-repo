@@ -13,7 +13,7 @@ return new class extends Migration
     {
         Schema::create('sittings', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('session_id')->constrained()->onDelete('cascade');
+            $table->foreignId('session_id')->constrained('legislative_sessions')->onDelete('cascade');
             $table->date('date');
             $table->time('time_opened')->nullable();
             $table->enum('status', ['draft', 'submitted', 'official'])->default('draft');

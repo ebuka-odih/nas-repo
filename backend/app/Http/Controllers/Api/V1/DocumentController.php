@@ -40,6 +40,18 @@ class DocumentController extends Controller
         $file = $request->file('file');
         $path = $file->store("sittings/{$id}/documents", 'public');
 
+        // Extract text if it's an image
+        $extractedText = null;
+        if (str_starts_with($file->getMimeType(), 'image/')) {
+            try {
+                $ocr = new \thiagoalessio\TesseractOCR\TesseractOCR($file->getRealPath());
+                $extractedText = $ocr->run();
+            } catch (\Exception $e) {
+                // Log error but continue
+                \Illuminate\Support\Facades\Log::error('OCR failed: ' . $e->getMessage());
+            }
+        }
+
         $document = Document::create([
             'sitting_id' => $id,
             'type' => $validated['type'],
@@ -47,6 +59,7 @@ class DocumentController extends Controller
             'file_name' => $file->getClientOriginalName(),
             'mime_type' => $file->getMimeType(),
             'file_size' => $file->getSize(),
+            'extracted_text' => $extractedText,
             'is_read_only' => false,
         ]);
 
@@ -57,6 +70,63 @@ class DocumentController extends Controller
             'message' => 'Document uploaded successfully',
             'data' => $document,
         ], 201);
+    }
+
+    /**
+     * Process document (OCR) without storing relation
+     * POST /api/v1/documents/process
+     */
+    public function process(Request $request): JsonResponse
+    {
+        $request->validate([
+            'file' => 'nullable|file|mimes:jpeg,png,jpg,bmp',
+            'image_base64' => 'nullable|string',
+        ]);
+
+        try {
+            $tempPath = null;
+            $text = '';
+
+            if ($request->hasFile('file')) {
+                $file = $request->file('file');
+                $tempPath = $file->getRealPath();
+                $text = (new \thiagoalessio\TesseractOCR\TesseractOCR($tempPath))->run();
+            } elseif ($request->filled('image_base64')) {
+                // Handle base64
+                $data = $request->input('image_base64');
+                // Remove header if present
+                if (preg_match('/^data:image\/(\w+);base64,/', $data, $type)) {
+                    $data = substr($data, strpos($data, ',') + 1);
+                    $type = strtolower($type[1]); // jpg, png, etc.
+                } else {
+                    $type = 'png'; // Default
+                }
+                
+                $data = base64_decode($data);
+                if ($data === false) {
+                    throw new \Exception('Invalid base64 data');
+                }
+
+                $tempPath = tempnam(sys_get_temp_dir(), 'ocr_') . '.' . $type;
+                file_put_contents($tempPath, $data);
+                
+                $text = (new \thiagoalessio\TesseractOCR\TesseractOCR($tempPath))->run();
+                unlink($tempPath);
+            } else {
+                 return response()->json(['success' => false, 'message' => 'No image provided'], 400);
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => ['text' => $text]
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Processing failed: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
