@@ -76,6 +76,20 @@ class AuditService
             $description ?? "Status changed from {$oldStatus} to {$newStatus}"
         );
     }
+
+    /**
+     * Log deletion of a model
+     */
+    public function logDelete(Model $model, ?string $description = null): AuditLog
+    {
+        return $this->log(
+            $model,
+            'deleted',
+            $model->getAttributes(),
+            null,
+            $description
+        );
+    }
 }
 
 

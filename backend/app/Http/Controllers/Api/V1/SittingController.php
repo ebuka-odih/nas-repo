@@ -145,4 +145,25 @@ class SittingController extends Controller
             ], 400);
         }
     }
+
+    /**
+     * Delete a sitting (only draft sittings)
+     * DELETE /api/v1/sittings/{id}
+     */
+    public function destroy(Request $request, int $id): JsonResponse
+    {
+        try {
+            $this->service->delete($id, $request->user()->id);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Sitting deleted successfully',
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 400);
+        }
+    }
 }

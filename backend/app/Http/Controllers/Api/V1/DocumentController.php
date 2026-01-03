@@ -33,7 +33,7 @@ class DocumentController extends Controller
         }
 
         $validated = $request->validate([
-            'file' => 'required|file|max:10240', // 10MB max
+            'file' => 'required|file|max:5120', // 5MB max
             'type' => 'required|in:original_scan,rendered_html,rendered_pdf',
         ]);
 

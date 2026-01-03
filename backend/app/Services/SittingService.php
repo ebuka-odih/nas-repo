@@ -103,6 +103,34 @@ class SittingService
     {
         return $sitting->isDraft();
     }
+
+    /**
+     * Delete a sitting (only draft sittings can be deleted)
+     */
+    public function delete(int $sittingId, int $userId): void
+    {
+        DB::transaction(function () use ($sittingId, $userId) {
+            $sitting = $this->repository->findOrFail($sittingId);
+
+            // Only draft sittings can be deleted
+            if (!$sitting->isDraft()) {
+                throw new \Exception('Only draft sittings can be deleted');
+            }
+
+            // Only the creator or admin can delete (check if user is creator or has admin role)
+            // For now, we'll allow deletion if user is the creator
+            // You can add role checking here if needed
+            if ($sitting->created_by !== $userId) {
+                throw new \Exception('You can only delete sittings you created');
+            }
+
+            // Log the deletion before deleting
+            $this->auditService->logDelete($sitting, 'Sitting deleted');
+
+            // Delete the sitting (cascade will handle related records)
+            $this->repository->delete($sitting);
+        });
+    }
 }
 
 

@@ -37,6 +37,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/sittings', [SittingController::class, 'store'])->middleware('role:clerk,admin');
         Route::get('/sittings/{id}', [SittingController::class, 'show']);
         Route::get('/sittings/{id}/summary', [SittingController::class, 'summary']);
+        Route::delete('/sittings/{id}', [SittingController::class, 'destroy'])->middleware('role:clerk,admin');
         Route::post('/sittings/{id}/submit', [SittingController::class, 'submit'])->middleware('role:clerk,admin');
         Route::post('/sittings/{id}/officialize', [SittingController::class, 'officialize'])->middleware('role:reviewer,admin');
 

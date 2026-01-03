@@ -33,6 +33,14 @@ class SittingRepository
     }
 
     /**
+     * Delete a sitting
+     */
+    public function delete(Sitting $sitting): bool
+    {
+        return $sitting->delete();
+    }
+
+    /**
      * List sittings with filters
      */
     public function list(array $filters = [], int $perPage = 15): LengthAwarePaginator
@@ -61,7 +69,9 @@ class SittingRepository
             $query->where('status', $filters['status']);
         }
 
-        return $query->orderBy('date', 'desc')->paginate($perPage);
+        return $query->orderBy('created_at', 'desc')
+            ->orderBy('date', 'desc')
+            ->paginate($perPage);
     }
 
     /**
@@ -132,7 +142,9 @@ class SittingRepository
             });
         }
 
-        return $query->orderBy('date', 'desc')->get();
+        return $query->orderBy('created_at', 'desc')
+            ->orderBy('date', 'desc')
+            ->get();
     }
 }
 
