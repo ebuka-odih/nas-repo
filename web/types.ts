@@ -18,6 +18,13 @@ export interface Bill {
   stage: string;
 }
 
+export interface Document {
+  id: string;
+  file_name: string;
+  extracted_text: string | null;
+  type: string;
+}
+
 export interface Sitting {
   id: string;
   assembly: string;
@@ -26,6 +33,7 @@ export interface Sitting {
   time: string;
   agendaItems: AgendaItem[];
   bills: Bill[];
+  documents?: Document[];
   status: SittingStatus;
   summaryText?: string;
 }

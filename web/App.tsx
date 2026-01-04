@@ -49,7 +49,7 @@ export default function App() {
   const [editingAgendaId, setEditingAgendaId] = useState<string | undefined>();
   const [searchQuery, setSearchQuery] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  
+
   // New Entry specific state
   const [capturedImages, setCapturedImages] = useState<string[]>([]);
   const [capturedFiles, setCapturedFiles] = useState<File[]>([]);
@@ -57,6 +57,8 @@ export default function App() {
   const [assemblies, setAssemblies] = useState<Assembly[]>([]);
   const [availableSessions, setAvailableSessions] = useState<Session[]>([]);
   const [selectedAssemblyId, setSelectedAssemblyId] = useState<number | null>(null);
+  const [detailedSitting, setDetailedSitting] = useState<Sitting | null>(null);
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
   // Session filters
   const [filterParliament, setFilterParliament] = useState('All');
@@ -201,12 +203,48 @@ export default function App() {
     };
 
     fetchSittings();
+    fetchSittings();
   }, [isLoggedIn, view, filterParliament, filterSession, assemblies, availableSessions]);
+
+  // Fetch detailed sitting when entering session_summary
+  useEffect(() => {
+    if (view === 'session_summary' && selectedId && isLoggedIn) {
+      const fetchDetails = async () => {
+        setIsLoadingDetails(true);
+        try {
+          const response = await sittingsApi.getById(Number(selectedId));
+          if (response.success && response.data) {
+            const data = response.data;
+            // Map backend response to frontend Sitting type
+            setDetailedSitting({
+              id: String(data.id),
+              assembly: data.session?.assembly?.name || 'Unknown Assembly',
+              session: data.session?.name || 'Unknown Session',
+              date: data.date,
+              time: data.time_opened?.substring(0, 5) || '', // HH:MM
+              status: (data.status === 'official' || data.status === 'official' as any) ? SittingStatus.OFFICIAL : SittingStatus.DRAFT,
+              agendaItems: data.agenda_items || [],
+              bills: data.bills || [],
+              documents: (data as any).documents || [],
+              summaryText: undefined
+            });
+          }
+        } catch (e) {
+          console.error("Failed to fetch details", e);
+        } finally {
+          setIsLoadingDetails(false);
+        }
+      };
+      fetchDetails();
+    } else {
+      setDetailedSitting(null);
+    }
+  }, [view, selectedId, isLoggedIn]);
 
   // Handle delete sitting
   const handleDeleteSitting = async (sittingId: string, e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent card click
-    
+
     if (!confirm('Are you sure you want to delete this sitting? This action cannot be undone.')) {
       return;
     }
@@ -244,7 +282,7 @@ export default function App() {
     const fromAssemblies = assemblies.map(a => a.name);
     return ['All', ...new Set([...fromSittings, ...fromAssemblies])];
   }, [sittings, assemblies]);
-  
+
   const sessions = useMemo(() => {
     const fromSittings = sittings.map(s => s.session);
     const fromApiSessions = availableSessions.map(s => s.name);
@@ -257,7 +295,7 @@ export default function App() {
     if (filterSession !== 'All') result = result.filter(s => s.session === filterSession);
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
-      result = result.filter(s => 
+      result = result.filter(s =>
         s.date.toLowerCase().includes(q) ||
         s.summaryText?.toLowerCase().includes(q) ||
         s.id.toLowerCase().includes(q)
@@ -282,7 +320,7 @@ export default function App() {
 
     try {
       const response = await authApi.login({ email, password });
-      
+
       if (response.success && response.data) {
         setIsLoggedIn(true);
         setView('home');
@@ -328,7 +366,7 @@ export default function App() {
       };
       reader.readAsDataURL(file);
     });
-    
+
     if (e.target) e.target.value = '';
   };
 
@@ -355,7 +393,7 @@ export default function App() {
       if (!activeDraft.date) missingFields.push('Date');
       if (!activeDraft.time) missingFields.push('Time');
       if (capturedFiles.length === 0) missingFields.push('at least one document photo');
-      
+
       alert(`Please provide all metadata and capture at least one document photo.\n\nMissing: ${missingFields.join(', ')}`);
       return;
     }
@@ -399,14 +437,14 @@ export default function App() {
 
       // Step 4: Upload all document images and extract text using OCR
       const uploadResults = await Promise.allSettled(
-        capturedFiles.map(file => 
+        capturedFiles.map(file =>
           documentsApi.upload(createdSitting.id, file, 'original_scan')
         )
       );
 
       // Collect extracted text from successfully uploaded documents
       const extractedTexts: Array<{ file_name: string; extracted_text: string | null }> = [];
-      
+
       uploadResults.forEach((result, index) => {
         if (result.status === 'fulfilled' && result.value.success && result.value.data) {
           const document = result.value.data;
@@ -420,7 +458,7 @@ export default function App() {
       // Display extracted text in JSON format
       const extractedTextJson = JSON.stringify(extractedTexts, null, 2);
       console.log('Extracted Text from Documents (JSON):', extractedTextJson);
-      
+
       // Also log individual document texts
       extractedTexts.forEach((doc, index) => {
         console.log(`Document ${index + 1} (${doc.file_name}):`, doc.extracted_text || 'No text extracted');
@@ -430,7 +468,7 @@ export default function App() {
       const failedUploads = uploadResults.filter(result => result.status === 'rejected');
       if (failedUploads.length > 0) {
         console.error('Some document uploads failed:', failedUploads);
-        
+
         // Check for 413 errors (file too large)
         const fileSizeErrors = failedUploads.filter(result => {
           if (result.status === 'rejected' && result.reason) {
@@ -456,7 +494,7 @@ export default function App() {
       setActiveDraft({});
       setSelectedAssemblyId(null);
       setAvailableSessions([]);
-      
+
       navigate('sessions');
     } catch (err: any) {
       console.error('Error creating sitting:', err);
@@ -518,7 +556,7 @@ export default function App() {
         <div className="bg-white border border-slate-200 rounded-[3rem] p-10 md:p-14 shadow-2xl space-y-12 border-b-8">
           <div className="text-center space-y-4">
             <div className="w-20 h-20 bg-slate-900 text-white rounded-3xl flex items-center justify-center mx-auto shadow-xl border-4 border-slate-800">
-               <Icons.Sessions />
+              <Icons.Sessions />
             </div>
             <div className="space-y-1">
               <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tighter">Registry Portal</h2>
@@ -533,26 +571,26 @@ export default function App() {
             )}
             <div className="space-y-2">
               <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest px-2">Email Address</label>
-              <input 
-                type="email" 
+              <input
+                type="email"
                 name="email"
-                placeholder="clerk@example.com" 
-                required 
-                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-5 outline-none focus:ring-4 focus:ring-blue-600/5 focus:border-blue-400 text-sm font-bold transition-all" 
+                placeholder="clerk@example.com"
+                required
+                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-5 outline-none focus:ring-4 focus:ring-blue-600/5 focus:border-blue-400 text-sm font-bold transition-all"
               />
             </div>
             <div className="space-y-2">
               <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest px-2">Secure Passcode</label>
-              <input 
-                type="password" 
+              <input
+                type="password"
                 name="password"
-                placeholder="••••••••" 
-                required 
-                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-5 outline-none focus:ring-4 focus:ring-blue-600/5 focus:border-blue-400 text-sm font-bold transition-all" 
+                placeholder="••••••••"
+                required
+                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-5 outline-none focus:ring-4 focus:ring-blue-600/5 focus:border-blue-400 text-sm font-bold transition-all"
               />
             </div>
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               disabled={isProcessing}
               className="w-full bg-blue-600 text-white text-[10px] font-black uppercase tracking-[0.3em] py-6 rounded-2xl shadow-xl shadow-blue-600/20 active:scale-95 transition-all hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -560,7 +598,7 @@ export default function App() {
             </button>
           </form>
           <div className="pt-6 text-center">
-             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">Authorized Personnel Only.<br/>Access is monitored and recorded.</p>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">Authorized Personnel Only.<br />Access is monitored and recorded.</p>
           </div>
         </div>
       </div>
@@ -603,11 +641,10 @@ export default function App() {
                       <h4 className="text-lg font-black text-slate-800 mb-1">{sitting.date} at {sitting.time}</h4>
                       <p className="text-sm text-slate-600 line-clamp-2">{sitting.summaryText || 'No summary available'}</p>
                     </div>
-                    <div className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${
-                      sitting.status === SittingStatus.OFFICIAL 
-                        ? 'bg-emerald-50 text-emerald-600' 
-                        : 'bg-amber-50 text-amber-600'
-                    }`}>
+                    <div className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${sitting.status === SittingStatus.OFFICIAL
+                      ? 'bg-emerald-50 text-emerald-600'
+                      : 'bg-amber-50 text-amber-600'
+                      }`}>
                       {sitting.status}
                     </div>
                   </div>
@@ -658,11 +695,10 @@ export default function App() {
                         <Icons.Trash />
                       </button>
                     )}
-                    <div className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${
-                      sitting.status === SittingStatus.OFFICIAL 
-                        ? 'bg-emerald-50 text-emerald-600' 
-                        : 'bg-amber-50 text-amber-600'
-                    }`}>
+                    <div className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${sitting.status === SittingStatus.OFFICIAL
+                      ? 'bg-emerald-50 text-emerald-600'
+                      : 'bg-amber-50 text-amber-600'
+                      }`}>
                       {sitting.status}
                     </div>
                   </div>
@@ -718,7 +754,7 @@ export default function App() {
                 <select
                   value={activeDraft.session || ''}
                   onChange={(e) => {
-                    setActiveDraft({...activeDraft, session: e.target.value});
+                    setActiveDraft({ ...activeDraft, session: e.target.value });
                   }}
                   disabled={!selectedAssemblyId || availableSessions.length === 0}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-blue-600/5 focus:border-blue-400 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -734,11 +770,11 @@ export default function App() {
               </div>
               <div>
                 <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Date</label>
-                <input type="date" value={activeDraft.date || ''} onChange={(e) => setActiveDraft({...activeDraft, date: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-blue-600/5 focus:border-blue-400" />
+                <input type="date" value={activeDraft.date || ''} onChange={(e) => setActiveDraft({ ...activeDraft, date: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-blue-600/5 focus:border-blue-400" />
               </div>
               <div>
                 <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Time</label>
-                <input type="time" value={activeDraft.time || ''} onChange={(e) => setActiveDraft({...activeDraft, time: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-blue-600/5 focus:border-blue-400" />
+                <input type="time" value={activeDraft.time || ''} onChange={(e) => setActiveDraft({ ...activeDraft, time: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-blue-600/5 focus:border-blue-400" />
               </div>
             </div>
           </div>
@@ -806,7 +842,7 @@ export default function App() {
           <div className="bg-white border border-slate-200 rounded-2xl p-6">
             <h3 className="text-lg font-black text-slate-800 mb-4">User Settings</h3>
             <p className="text-sm text-slate-600 mb-6">Profile settings coming soon...</p>
-            <button 
+            <button
               onClick={handleLogout}
               className="w-full bg-red-600 text-white text-sm font-black uppercase tracking-widest py-4 rounded-xl hover:bg-red-700 transition-colors"
             >
@@ -820,7 +856,24 @@ export default function App() {
   );
 
   const renderSessionSummary = () => {
-    if (!currentSitting) {
+    // Show loading detailed view
+    if (isLoadingDetails) {
+      return (
+        <>
+          <TopBar title="Loading..." showBack />
+          <ViewContainer>
+            <div className="flex items-center justify-center h-64">
+              <div className="text-slate-400 font-bold">Loading detailed records...</div>
+            </div>
+          </ViewContainer>
+          <BottomNav />
+        </>
+      );
+    }
+
+    const sitting = detailedSitting || currentSitting;
+
+    if (!sitting) {
       return (
         <>
           <TopBar title="Session Not Found" showBack />
@@ -834,32 +887,60 @@ export default function App() {
 
     return (
       <>
-        <TopBar title={`${currentSitting.date} - ${currentSitting.time}`} showBack />
+        <TopBar title={`${sitting.date} - ${sitting.time}`} showBack />
         <ViewContainer>
           <div className="space-y-6">
             <div className="bg-white border border-slate-200 rounded-2xl p-6">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h2 className="text-2xl font-black text-slate-800">{currentSitting.assembly}</h2>
-                  <p className="text-sm text-slate-600">{currentSitting.session}</p>
+                  <h2 className="text-2xl font-black text-slate-800">{sitting.assembly}</h2>
+                  <p className="text-sm text-slate-600">{sitting.session}</p>
                 </div>
-                <div className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest ${
-                  currentSitting.status === SittingStatus.OFFICIAL 
-                    ? 'bg-emerald-50 text-emerald-600' 
+                <div className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest ${sitting.status === SittingStatus.OFFICIAL
+                    ? 'bg-emerald-50 text-emerald-600'
                     : 'bg-amber-50 text-amber-600'
-                }`}>
-                  {currentSitting.status}
+                  }`}>
+                  {sitting.status}
                 </div>
               </div>
-              {currentSitting.summaryText && (
-                <p className="text-sm text-slate-700 leading-relaxed">{currentSitting.summaryText}</p>
+              {sitting.summaryText && (
+                <p className="text-sm text-slate-700 leading-relaxed">{sitting.summaryText}</p>
               )}
             </div>
-            {currentSitting.agendaItems.length > 0 && (
+
+            {/* Documents Section with Extracted Text */}
+            {sitting.documents && sitting.documents.length > 0 && (
+              <div className="space-y-6">
+                <h3 className="text-lg font-black text-slate-800 px-2 uppercase tracking-widest text-xs text-slate-400">Official Documents</h3>
+                {sitting.documents.map((doc, idx) => (
+                  <div key={doc.id || idx} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                    <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+                      <h4 className="font-bold text-slate-800 text-sm">{doc.file_name}</h4>
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{doc.type}</span>
+                    </div>
+                    <div className="p-6">
+                      {doc.extracted_text ? (
+                        <div className="prose prose-sm max-w-none">
+                          <pre className="whitespace-pre-wrap font-mono text-xs bg-slate-50 p-4 rounded-xl border border-slate-100 text-slate-700 leading-normal">
+                            {doc.extracted_text}
+                          </pre>
+                        </div>
+                      ) : (
+                        <div className="text-center py-8 text-slate-400 text-sm font-medium">
+                          No text content extracted from this document.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {sitting.agendaItems.length > 0 && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6">
                 <h3 className="text-lg font-black text-slate-800 mb-4">Agenda Items</h3>
                 <div className="space-y-4">
-                  {currentSitting.agendaItems.map((item) => (
+                  {sitting.agendaItems.map((item) => (
                     <div key={item.id} className="border-l-4 border-blue-600 pl-4">
                       <h4 className="font-black text-slate-800">{item.number}. {item.title}</h4>
                       <p className="text-sm text-slate-600 mt-1">{item.content}</p>
@@ -868,11 +949,11 @@ export default function App() {
                 </div>
               </div>
             )}
-            {currentSitting.bills.length > 0 && (
+            {sitting.bills.length > 0 && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6">
                 <h3 className="text-lg font-black text-slate-800 mb-4">Bills</h3>
                 <div className="space-y-3">
-                  {currentSitting.bills.map((bill) => (
+                  {sitting.bills.map((bill) => (
                     <div key={bill.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-xl">
                       <div>
                         <h4 className="font-bold text-slate-800">{bill.title}</h4>
