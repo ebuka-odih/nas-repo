@@ -14,7 +14,8 @@ class DocumentController extends Controller
 {
     public function __construct(
         private SittingRepository $sittingRepository,
-        private AuditService $auditService
+        private AuditService $auditService,
+        private \App\Services\OcrService $ocrService
     ) {}
 
     /**
@@ -43,13 +44,7 @@ class DocumentController extends Controller
         // Extract text if it's an image
         $extractedText = null;
         if (str_starts_with($file->getMimeType(), 'image/')) {
-            try {
-                $ocr = new \thiagoalessio\TesseractOCR\TesseractOCR($file->getRealPath());
-                $extractedText = $ocr->run();
-            } catch (\Exception $e) {
-                // Log error but continue
-                \Illuminate\Support\Facades\Log::error('OCR failed: ' . $e->getMessage());
-            }
+            $extractedText = $this->ocrService->extractText($file);
         }
 
         $document = Document::create([
@@ -84,13 +79,10 @@ class DocumentController extends Controller
         ]);
 
         try {
-            $tempPath = null;
             $text = '';
 
             if ($request->hasFile('file')) {
-                $file = $request->file('file');
-                $tempPath = $file->getRealPath();
-                $text = (new \thiagoalessio\TesseractOCR\TesseractOCR($tempPath))->run();
+                $text = $this->ocrService->extractText($request->file('file'));
             } elseif ($request->filled('image_base64')) {
                 // Handle base64
                 $data = $request->input('image_base64');
@@ -110,7 +102,7 @@ class DocumentController extends Controller
                 $tempPath = tempnam(sys_get_temp_dir(), 'ocr_') . '.' . $type;
                 file_put_contents($tempPath, $data);
                 
-                $text = (new \thiagoalessio\TesseractOCR\TesseractOCR($tempPath))->run();
+                $text = $this->ocrService->extractText($tempPath);
                 unlink($tempPath);
             } else {
                  return response()->json(['success' => false, 'message' => 'No image provided'], 400);

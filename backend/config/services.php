@@ -35,4 +35,8 @@ return [
         ],
     ],
 
+    'ocr_space' => [
+        'key' => env('OCR_SPACE_KEY', 'helloworld'), // default 'helloworld' works for demo
+    ],
+
 ];
