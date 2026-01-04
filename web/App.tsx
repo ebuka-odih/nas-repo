@@ -38,6 +38,57 @@ const INITIAL_SITTINGS: Sitting[] = [
 type SortField = 'date' | 'assembly' | 'session';
 type SortOrder = 'asc' | 'desc';
 
+// Simple parser for document text to apply formatting
+const DocumentFormatter = ({ text }: { text: string }) => {
+  if (!text) return null;
+
+  // Split lines and filter empty ones
+  const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
+
+  return (
+    <div className="font-sans text-slate-800 leading-relaxed text-sm space-y-2">
+      {lines.map((line, i) => {
+        const trimmed = line.trim();
+
+        // Match numbered headers (e.g., "1. Presentation of Bills:")
+        // We look for a number at the start, followed by a dot
+        const headerMatch = trimmed.match(/^(\d+)\.\s+(.*)/);
+
+        // Match roman numerals (e.g., "(i)", "(ii)")
+        const subItemMatch = trimmed.match(/^(\([ivx]+\))\s+(.*)/i);
+
+        if (headerMatch) {
+          return (
+            <div key={i} className="flex gap-3 pt-4 pb-1">
+              <span className="font-black text-slate-900 text-base">{headerMatch[1]}.</span>
+              <span className="font-bold text-slate-900 text-base uppercase tracking-tight">{headerMatch[2]}</span>
+            </div>
+          );
+        }
+
+        if (subItemMatch) {
+          return (
+            <div key={i} className="flex gap-3 ml-4 pl-4 border-l-2 border-slate-100 py-1">
+              <span className="font-bold text-slate-500 min-w-[24px]">{subItemMatch[1]}</span>
+              <span className="text-slate-700">{subItemMatch[2]}</span>
+            </div>
+          );
+        }
+
+        // Regular content (indented to align with headers)
+        // We detect if it looks like a "Title" line (ALL CAPS) vs normal text
+        const isAllCaps = trimmed === trimmed.toUpperCase() && trimmed.length > 5;
+
+        return (
+          <div key={i} className={`ml-8 ${isAllCaps ? 'font-bold text-slate-700 pt-2' : 'text-slate-600'}`}>
+            {trimmed}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
@@ -897,8 +948,8 @@ export default function App() {
                   <p className="text-sm text-slate-600">{sitting.session}</p>
                 </div>
                 <div className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest ${sitting.status === SittingStatus.OFFICIAL
-                    ? 'bg-emerald-50 text-emerald-600'
-                    : 'bg-amber-50 text-amber-600'
+                  ? 'bg-emerald-50 text-emerald-600'
+                  : 'bg-amber-50 text-amber-600'
                   }`}>
                   {sitting.status}
                 </div>
@@ -920,10 +971,8 @@ export default function App() {
                     </div>
                     <div className="p-6">
                       {doc.extracted_text ? (
-                        <div className="prose prose-sm max-w-none">
-                          <pre className="whitespace-pre-wrap font-mono text-xs bg-slate-50 p-4 rounded-xl border border-slate-100 text-slate-700 leading-normal">
-                            {doc.extracted_text}
-                          </pre>
+                        <div className="bg-white p-4 rounded-xl border border-slate-100">
+                          <DocumentFormatter text={doc.extracted_text} />
                         </div>
                       ) : (
                         <div className="text-center py-8 text-slate-400 text-sm font-medium">
