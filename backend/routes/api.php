@@ -20,6 +20,54 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
+// Handle OPTIONS preflight requests for CORS
+Route::options('/{any}', function (\Illuminate\Http\Request $request) {
+    $origin = $request->header('Origin');
+    $corsConfig = config('cors');
+    
+    // Check if origin is allowed
+    $allowedOrigins = $corsConfig['allowed_origins'] ?? [];
+    $allowedPatterns = $corsConfig['allowed_origins_patterns'] ?? [];
+    
+    $isAllowed = false;
+    if ($origin && in_array($origin, $allowedOrigins)) {
+        $isAllowed = true;
+    } elseif ($origin) {
+        foreach ($allowedPatterns as $pattern) {
+            if (preg_match($pattern, $origin)) {
+                $isAllowed = true;
+                break;
+            }
+        }
+    }
+    
+    $response = response('', 200);
+    
+    if ($isAllowed && $origin) {
+        $response->header('Access-Control-Allow-Origin', $origin);
+        
+        // Handle allowed_methods (can be array or '*')
+        $methods = $corsConfig['allowed_methods'] ?? ['*'];
+        $methodsStr = is_array($methods) ? implode(', ', $methods) : $methods;
+        $response->header('Access-Control-Allow-Methods', $methodsStr);
+        
+        // Handle allowed_headers (can be array or '*')
+        $headers = $corsConfig['allowed_headers'] ?? ['*'];
+        $headersStr = is_array($headers) ? implode(', ', $headers) : $headers;
+        $response->header('Access-Control-Allow-Headers', $headersStr);
+        
+        if ($corsConfig['supports_credentials'] ?? false) {
+            $response->header('Access-Control-Allow-Credentials', 'true');
+        }
+        
+        if (($corsConfig['max_age'] ?? 0) > 0) {
+            $response->header('Access-Control-Max-Age', (string) $corsConfig['max_age']);
+        }
+    }
+    
+    return $response;
+})->where('any', '.*');
+
 // API info endpoint (no version prefix)
 Route::get('/', function () {
     return response()->json([

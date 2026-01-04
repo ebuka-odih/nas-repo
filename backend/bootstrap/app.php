@@ -13,6 +13,11 @@ return Application::configure(basePath: dirname(__DIR__))
         apiPrefix: 'api',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Ensure CORS is enabled for API routes
+        $middleware->api(prepend: [
+            \Illuminate\Http\Middleware\HandleCors::class,
+        ]);
+        
         $middleware->alias([
             'role' => \App\Http\Middleware\EnsureRole::class,
             'draft.editable' => \App\Http\Middleware\EnsureDraftEditable::class,
