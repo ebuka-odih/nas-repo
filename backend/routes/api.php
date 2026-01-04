@@ -20,6 +20,20 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
+// API info endpoint (no version prefix)
+Route::get('/', function () {
+    return response()->json([
+        'success' => true,
+        'message' => 'Senate Votes & Proceedings API',
+        'version' => '1.0',
+        'endpoints' => [
+            'v1' => '/api/v1',
+            'login' => '/api/v1/login',
+            'documentation' => 'All endpoints are under /api/v1'
+        ]
+    ]);
+});
+
 Route::prefix('v1')->group(function () {
     // Authentication endpoints (public)
     Route::post('/login', [\App\Http\Controllers\Api\V1\AuthController::class, 'login']);
