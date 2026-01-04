@@ -5,6 +5,8 @@ import { authApi, apiClient, assembliesApi, sessionsApi, sittingsApi, documentsA
 import type { ApiError } from './services/api';
 import type { Assembly } from './services/api/assemblies';
 import type { Session } from './services/api/sessions';
+// @ts-ignore - heic2any doesn't have types
+import heic2any from 'heic2any';
 
 // Mock Initial Data
 const INITIAL_SITTINGS: Sitting[] = [
@@ -37,6 +39,103 @@ const INITIAL_SITTINGS: Sitting[] = [
 
 type SortField = 'date' | 'assembly' | 'session';
 type SortOrder = 'asc' | 'desc';
+
+// Image compression utility
+const compressImage = (file: File, maxWidth: number = 1920, quality: number = 0.85): Promise<File> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        // Calculate new dimensions
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Could not get canvas context'));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              reject(new Error('Compression failed'));
+              return;
+            }
+            // Create new file with compressed blob
+            const compressedFile = new File([blob], file.name.replace(/\.[^/.]+$/, '.jpg'), {
+              type: 'image/jpeg',
+              lastModified: Date.now(),
+            });
+            resolve(compressedFile);
+          },
+          'image/jpeg',
+          quality
+        );
+      };
+      img.onerror = () => reject(new Error('Failed to load image'));
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
+};
+
+// Convert HEIC to JPEG
+const convertHeicToJpeg = async (file: File): Promise<File> => {
+  try {
+    const convertedBlob = await heic2any({
+      blob: file,
+      toType: 'image/jpeg',
+      quality: 0.92,
+    });
+
+    // heic2any can return array or single blob
+    const blob = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
+    
+    return new File([blob], file.name.replace(/\.heic$/i, '.jpg'), {
+      type: 'image/jpeg',
+      lastModified: Date.now(),
+    });
+  } catch (error) {
+    console.error('HEIC conversion error:', error);
+    throw new Error('Failed to convert HEIC image. Please try a different format.');
+  }
+};
+
+// Process image: convert HEIC if needed, then compress
+const processImage = async (file: File): Promise<File> => {
+  const isHeic = file.type === 'image/heic' || 
+                 file.type === 'image/heif' || 
+                 file.name.toLowerCase().endsWith('.heic') ||
+                 file.name.toLowerCase().endsWith('.heif');
+
+  let processedFile = file;
+
+  // Convert HEIC to JPEG first
+  if (isHeic) {
+    processedFile = await convertHeicToJpeg(file);
+  }
+
+  // Compress all images
+  if (processedFile.type.startsWith('image/')) {
+    processedFile = await compressImage(processedFile);
+  }
+
+  return processedFile;
+};
 
 // Simple parser for document text to apply formatting
 // Simple parser for document text to apply formatting
@@ -125,6 +224,15 @@ export default function App() {
   const [capturedImages, setCapturedImages] = useState<string[]>([]);
   const [capturedFiles, setCapturedFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
+  
+  // State for adding documents to existing sitting
+  const [addingDocuments, setAddingDocuments] = useState(false);
+  const [documentsToAdd, setDocumentsToAdd] = useState<File[]>([]);
+  const [documentPreviews, setDocumentPreviews] = useState<string[]>([]);
+  const addDocumentsInputRef = useRef<HTMLInputElement>(null);
+  const addDocumentsCameraRef = useRef<HTMLInputElement>(null);
   const [assemblies, setAssemblies] = useState<Assembly[]>([]);
   const [availableSessions, setAvailableSessions] = useState<Session[]>([]);
   const [selectedAssemblyId, setSelectedAssemblyId] = useState<number | null>(null);
@@ -425,26 +533,144 @@ export default function App() {
     }
   };
 
-  const handleImageCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []) as File[];
     if (files.length === 0) return;
 
-    const remainingSlots = 5 - capturedImages.length;
-    const filesToProcess = files.slice(0, remainingSlots);
+    setIsProcessingImage(true);
 
-    // Store File objects
-    setCapturedFiles(prev => [...prev, ...filesToProcess].slice(0, 5));
+    try {
+      const remainingSlots = 4 - capturedImages.length;
+      const filesToProcess = files.slice(0, remainingSlots);
 
-    // Store data URLs for preview
-    filesToProcess.forEach((file: File) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setCapturedImages(prev => [...prev, reader.result as string].slice(0, 5));
-      };
-      reader.readAsDataURL(file);
-    });
+      // Process each file (convert HEIC and compress)
+      const processedFiles: File[] = [];
+      const previewUrls: string[] = [];
 
-    if (e.target) e.target.value = '';
+      for (const file of filesToProcess) {
+        try {
+          const processed = await processImage(file);
+          processedFiles.push(processed);
+
+          // Create preview URL
+          const reader = new FileReader();
+          const previewPromise = new Promise<string>((resolve) => {
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(processed);
+          });
+          previewUrls.push(await previewPromise);
+        } catch (error) {
+          console.error('Error processing image:', error);
+          alert(`Failed to process ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      }
+
+      // Update state
+      setCapturedFiles(prev => [...prev, ...processedFiles].slice(0, 4));
+      setCapturedImages(prev => [...prev, ...previewUrls].slice(0, 4));
+    } catch (error) {
+      console.error('Error handling images:', error);
+      alert('Failed to process images. Please try again.');
+    } finally {
+      setIsProcessingImage(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleAddDocumentsCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []) as File[];
+    if (files.length === 0) return;
+
+    setIsProcessingImage(true);
+
+    try {
+      const remainingSlots = 4 - documentPreviews.length;
+      const filesToProcess = files.slice(0, remainingSlots);
+
+      // Process each file (convert HEIC and compress)
+      const processedFiles: File[] = [];
+      const previewUrls: string[] = [];
+
+      for (const file of filesToProcess) {
+        try {
+          const processed = await processImage(file);
+          processedFiles.push(processed);
+
+          // Create preview URL
+          const reader = new FileReader();
+          const previewPromise = new Promise<string>((resolve) => {
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(processed);
+          });
+          previewUrls.push(await previewPromise);
+        } catch (error) {
+          console.error('Error processing image:', error);
+          alert(`Failed to process ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      }
+
+      // Update state
+      setDocumentsToAdd(prev => [...prev, ...processedFiles].slice(0, 4));
+      setDocumentPreviews(prev => [...prev, ...previewUrls].slice(0, 4));
+    } catch (error) {
+      console.error('Error handling images:', error);
+      alert('Failed to process images. Please try again.');
+    } finally {
+      setIsProcessingImage(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const removeAddDocument = (index: number) => {
+    setDocumentPreviews(prev => prev.filter((_, i) => i !== index));
+    setDocumentsToAdd(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleAddDocumentsToSitting = async (sittingId: string) => {
+    if (documentsToAdd.length === 0) {
+      alert('Please select at least one document to upload.');
+      return;
+    }
+
+    setIsProcessing(true);
+
+    try {
+      const uploadResults = await Promise.allSettled(
+        documentsToAdd.map(file =>
+          documentsApi.upload(parseInt(sittingId), file, 'original_scan')
+        )
+      );
+
+      const failedUploads = uploadResults.filter(result => result.status === 'rejected');
+      
+      if (failedUploads.length > 0) {
+        alert(`${uploadResults.length - failedUploads.length} document(s) uploaded successfully, but ${failedUploads.length} failed. Please try again.`);
+      } else {
+        // Success - clear the form and refresh the sitting
+        setDocumentsToAdd([]);
+        setDocumentPreviews([]);
+        setAddingDocuments(false);
+        
+        // Refresh the sitting data
+        if (selectedId) {
+          try {
+            const response = await sittingsApi.getSummary(parseInt(selectedId));
+            if (response.success && response.data) {
+              setDetailedSitting(response.data as any);
+            }
+          } catch (error) {
+            console.error('Error refreshing sitting:', error);
+          }
+        }
+        
+        alert(`Successfully uploaded ${documentsToAdd.length} document(s)!`);
+      }
+    } catch (error: any) {
+      console.error('Error uploading documents:', error);
+      alert(error?.message || 'Failed to upload documents. Please try again.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const removeImage = (index: number) => {
@@ -957,18 +1183,50 @@ export default function App() {
             </div>
           </div>
           <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
-            <h3 className="text-lg font-black text-slate-800">Document Photos ({capturedImages.length}/5)</h3>
-            <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleImageCapture} className="hidden" />
-            <button onClick={() => fileInputRef.current?.click()} className="w-full border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:border-blue-400 transition-colors">
-              <Icons.Plus className="mx-auto mb-2 text-slate-400" />
-              <p className="text-sm font-bold text-slate-600">Tap to capture documents</p>
-            </button>
+            <h3 className="text-lg font-black text-slate-800">Document Photos ({capturedImages.length}/4)</h3>
+            <div className="flex gap-3">
+              <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleImageCapture} className="hidden" disabled={capturedImages.length >= 4 || isProcessingImage} />
+              <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleImageCapture} className="hidden" disabled={capturedImages.length >= 4 || isProcessingImage} />
+              <button 
+                onClick={() => cameraInputRef.current?.click()} 
+                disabled={capturedImages.length >= 4 || isProcessingImage}
+                className="flex-1 border-2 border-blue-600 bg-blue-50 text-blue-600 rounded-xl p-4 text-center hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                <span className="text-sm font-bold">Take Photo</span>
+              </button>
+              <button 
+                onClick={() => fileInputRef.current?.click()} 
+                disabled={capturedImages.length >= 4 || isProcessingImage}
+                className="flex-1 border-2 border-slate-300 bg-slate-50 text-slate-700 rounded-xl p-4 text-center hover:bg-slate-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                <span className="text-sm font-bold">Upload</span>
+              </button>
+            </div>
+            {isProcessingImage && (
+              <div className="text-center text-sm text-slate-600 py-2">
+                Processing images... (Converting HEIC and compressing)
+              </div>
+            )}
+            {capturedImages.length >= 4 && (
+              <div className="text-center text-xs text-amber-600 bg-amber-50 py-2 px-4 rounded-lg">
+                Maximum of 4 images reached. Remove an image to add more.
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               {capturedImages.map((img, idx) => (
                 <div key={idx} className="relative aspect-video bg-slate-100 rounded-xl overflow-hidden">
                   <img src={img} alt={`Document ${idx + 1}`} className="w-full h-full object-cover" />
-                  <button onClick={() => removeImage(idx)} className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1">
-                    <Icons.Plus className="rotate-45" />
+                  <button onClick={() => removeImage(idx)} className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1.5 hover:bg-red-600 transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
                   </button>
                 </div>
               ))}
@@ -1087,10 +1345,80 @@ export default function App() {
             </div>
 
             {/* Documents Section with Extracted Text */}
-            {sitting.documents && sitting.documents.length > 0 && (
-              <div className="space-y-6">
-                <h3 className="text-lg font-black text-slate-800 px-2 uppercase tracking-widest text-xs text-slate-400">Official Documents</h3>
-                {sitting.documents.map((doc, idx) => (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between px-2">
+                <h3 className="text-lg font-black text-slate-800 uppercase tracking-widest text-xs text-slate-400">Official Documents</h3>
+                {sitting.status === SittingStatus.DRAFT && (
+                  <button
+                    onClick={() => setAddingDocuments(!addingDocuments)}
+                    className="text-xs font-bold text-blue-600 hover:text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
+                  >
+                    {addingDocuments ? 'Cancel' : '+ Add Documents'}
+                  </button>
+                )}
+              </div>
+
+              {/* Add Documents Section */}
+              {addingDocuments && sitting.status === SittingStatus.DRAFT && (
+                <div className="bg-blue-50 border-2 border-blue-200 rounded-2xl p-6 space-y-4">
+                  <h4 className="text-sm font-black text-slate-800">Add More Documents ({documentPreviews.length}/4)</h4>
+                  <div className="flex gap-3">
+                    <input ref={addDocumentsCameraRef} type="file" accept="image/*" capture="environment" onChange={handleAddDocumentsCapture} className="hidden" disabled={documentPreviews.length >= 4 || isProcessingImage} />
+                    <input ref={addDocumentsInputRef} type="file" accept="image/*" multiple onChange={handleAddDocumentsCapture} className="hidden" disabled={documentPreviews.length >= 4 || isProcessingImage} />
+                    <button 
+                      onClick={() => addDocumentsCameraRef.current?.click()} 
+                      disabled={documentPreviews.length >= 4 || isProcessingImage}
+                      className="flex-1 border-2 border-blue-600 bg-white text-blue-600 rounded-xl p-3 text-center hover:bg-blue-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-xs font-bold"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      Take Photo
+                    </button>
+                    <button 
+                      onClick={() => addDocumentsInputRef.current?.click()} 
+                      disabled={documentPreviews.length >= 4 || isProcessingImage}
+                      className="flex-1 border-2 border-slate-300 bg-white text-slate-700 rounded-xl p-3 text-center hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-xs font-bold"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                      Upload
+                    </button>
+                  </div>
+                  {isProcessingImage && (
+                    <div className="text-center text-xs text-slate-600 py-2">
+                      Processing images... (Converting HEIC and compressing)
+                    </div>
+                  )}
+                  {documentPreviews.length > 0 && (
+                    <div className="grid grid-cols-2 gap-3">
+                      {documentPreviews.map((img, idx) => (
+                        <div key={idx} className="relative aspect-video bg-white rounded-xl overflow-hidden border border-slate-200">
+                          <img src={img} alt={`Document ${idx + 1}`} className="w-full h-full object-cover" />
+                          <button onClick={() => removeAddDocument(idx)} className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1.5 hover:bg-red-600 transition-colors">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <button
+                    onClick={() => handleAddDocumentsToSitting(sitting.id)}
+                    disabled={documentsToAdd.length === 0 || isProcessing}
+                    className="w-full bg-blue-600 text-white text-sm font-black uppercase tracking-widest py-3 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors"
+                  >
+                    {isProcessing ? 'Uploading...' : `Upload ${documentsToAdd.length} Document(s)`}
+                  </button>
+                </div>
+              )}
+
+              {/* Existing Documents */}
+              {sitting.documents && sitting.documents.length > 0 ? (
+                sitting.documents.map((doc, idx) => (
                   <div key={doc.id || idx} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm -mx-4 sm:mx-0">
                     <div className="bg-slate-50 px-3 sm:px-6 py-3 sm:py-4 border-b border-slate-200 flex items-center justify-between gap-2">
                       <h4 className="font-bold text-slate-800 text-xs sm:text-sm truncate flex-1 min-w-0">{doc.file_name}</h4>
@@ -1108,9 +1436,21 @@ export default function App() {
                       )}
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
+                ))
+              ) : (
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-8 text-center">
+                  <p className="text-slate-400 text-sm">No documents uploaded yet.</p>
+                  {sitting.status === SittingStatus.DRAFT && !addingDocuments && (
+                    <button
+                      onClick={() => setAddingDocuments(true)}
+                      className="mt-4 text-blue-600 hover:text-blue-700 text-sm font-bold"
+                    >
+                      + Add Documents
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
 
             {sitting.agendaItems.length > 0 && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6">
