@@ -68,19 +68,59 @@ Route::options('/{any}', function (\Illuminate\Http\Request $request) {
     return $response;
 })->where('any', '.*');
 
-// API info endpoint (no version prefix)
-Route::get('/', function () {
-    return response()->json([
+// API info endpoint (no version prefix) - accessible at /api or /api/
+Route::get('/', function (\Illuminate\Http\Request $request) {
+    $origin = $request->header('Origin');
+    $corsConfig = config('cors');
+    
+    // Get allowed origins
+    $allowedOrigins = $corsConfig['allowed_origins'] ?? [];
+    $allowedPatterns = $corsConfig['allowed_origins_patterns'] ?? [];
+    
+    // Check if origin is allowed
+    $isAllowed = false;
+    if ($origin) {
+        if (in_array($origin, $allowedOrigins)) {
+            $isAllowed = true;
+        } else {
+            foreach ($allowedPatterns as $pattern) {
+                if (preg_match($pattern, $origin)) {
+                    $isAllowed = true;
+                    break;
+                }
+            }
+        }
+    }
+    
+    $response = response()->json([
         'success' => true,
         'message' => 'Senate Votes & Proceedings API',
         'version' => '1.0',
+        'status' => 'online',
         'endpoints' => [
             'v1' => '/api/v1',
             'login' => '/api/v1/login',
             'documentation' => 'All endpoints are under /api/v1'
+        ],
+        'cors' => [
+            'enabled' => true,
+            'origin' => $origin,
+            'allowed' => $isAllowed
         ]
     ]);
-});
+    
+    // Add CORS headers
+    if ($isAllowed && $origin) {
+        $response->headers->set('Access-Control-Allow-Origin', $origin);
+        $response->headers->set('Access-Control-Allow-Methods', implode(', ', $corsConfig['allowed_methods'] ?? ['*']));
+        $response->headers->set('Access-Control-Allow-Headers', implode(', ', $corsConfig['allowed_headers'] ?? ['*']));
+        if ($corsConfig['supports_credentials'] ?? false) {
+            $response->headers->set('Access-Control-Allow-Credentials', 'true');
+        }
+    }
+    
+    return $response;
+})->name('api.info');
 
 Route::prefix('v1')->group(function () {
     // Authentication endpoints (public)
