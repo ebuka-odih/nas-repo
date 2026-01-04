@@ -13,10 +13,8 @@ return Application::configure(basePath: dirname(__DIR__))
         apiPrefix: 'api',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // Add CORS middleware first for all API routes
-        $middleware->api(prepend: [
-            \App\Http\Middleware\CorsMiddleware::class,
-        ]);
+        // CorsMiddleware removed to use native Laravel HandleCors
+
         
         $middleware->alias([
             'role' => \App\Http\Middleware\EnsureRole::class,
