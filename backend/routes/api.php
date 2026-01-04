@@ -90,6 +90,36 @@ Route::prefix('v1')->group(function () {
         // Route::get('/sittings/{id}/ai-summary', [AIController::class, 'summary']);
         // Route::get('/sittings/{id}/ai-questions', [AIController::class, 'questions']);
         // Route::get('/sittings/{id}/audio', [AIController::class, 'audio']);
+        // ... existing routes ...
+
+        // Debug endpoint for OCR
+        Route::post('/debug/ocr', function (\Illuminate\Http\Request $request, \App\Services\OcrService $ocrService) {
+            if (!$request->hasFile('file')) {
+                return response()->json(['error' => 'No file provided'], 400);
+            }
+            
+            $file = $request->file('file');
+            try {
+                $text = $ocrService->extractText($file);
+            } catch (\Exception $e) {
+                 return response()->json(['error' => $e->getMessage()], 500);
+            }
+            
+            return response()->json([
+                'success' => true,
+                'text_extracted' => $text,
+                'config_check' => [
+                    'has_custom_key' => config('services.ocr_space.key') !== 'helloworld',
+                    'driver' => config('app.ocr_driver')
+                ],
+                'file_info' => [
+                    'size' => $file->getSize(),
+                    'mime' => $file->getMimeType()
+                ],
+                // Return logs if possible, or just check laravel.log
+                'note' => 'Check storage/logs/laravel.log for detailed execution trace'
+            ]);
+        })->withoutMiddleware([\App\Http\Middleware\EnsureRole::class, 'draft.editable']); // Ensure it's accessible
     });
 });
 

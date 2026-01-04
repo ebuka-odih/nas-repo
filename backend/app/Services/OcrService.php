@@ -39,28 +39,40 @@ class OcrService
     {
         try {
             $apiKey = config('services.ocr_space.key', 'helloworld');
+            $driver = config('app.ocr_driver', 'auto');
             
+            Log::info("OCR Service: Attempting API extraction. Driver: {$driver}, Key Present: " . ($apiKey !== 'helloworld' ? 'Yes' : 'Using Demo'));
+
+            $filePath = $file instanceof UploadedFile ? $file->getRealPath() : $file;
+            Log::info("OCR Service: File path: {$filePath}");
+
             $response = Http::asMultipart()
                 ->post('https://api.ocr.space/parse/image', [
                     'apikey' => $apiKey,
-                    'file' => fopen($file instanceof UploadedFile ? $file->getRealPath() : $file, 'r'),
+                    'file' => fopen($filePath, 'r'),
                     'detectOrientation' => 'true',
                     'scale' => 'true',
                     'OCREngine' => '1',
                 ]);
 
+            Log::info("OCR Service: API Response Status: " . $response->status());
+
             if ($response->successful()) {
                 $result = $response->json();
                 
                 if (isset($result['ParsedResults'][0]['ParsedText'])) {
-                    return $result['ParsedResults'][0]['ParsedText'];
+                    $text = $result['ParsedResults'][0]['ParsedText'];
+                    Log::info("OCR Service: Success. Text length: " . strlen($text));
+                    return $text;
                 }
                 
                 if (isset($result['ErrorMessage'])) {
                     Log::error('OCR.space API Error: ' . json_encode($result['ErrorMessage']));
+                } else {
+                    Log::error('OCR.space API Unknown Error: ' . json_encode($result));
                 }
             } else {
-                Log::error('OCR.space HTTP Error: ' . $response->status());
+                Log::error('OCR.space HTTP Error: ' . $response->status() . ' Body: ' . $response->body());
             }
         } catch (\Exception $e) {
             Log::error('OCR Service Exception: ' . $e->getMessage());
