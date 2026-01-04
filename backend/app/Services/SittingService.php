@@ -120,9 +120,9 @@ class SittingService
             }
 
             // Admins can delete any draft sitting
-            // Clerks can only delete sittings they created
             if (!$user->isAdmin() && $sitting->created_by !== $user->id) {
-                throw new \Exception('You can only delete sittings you created');
+                 \Illuminate\Support\Facades\Log::info("Delete Failed: User Role: {$user->role}, Usr ID: {$user->id}, Sitting Creator: {$sitting->created_by}");
+                 throw new \Exception('You can only delete sittings you created');
             }
 
             // Log the deletion before deleting
