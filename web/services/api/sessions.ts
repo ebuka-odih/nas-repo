@@ -24,6 +24,14 @@ export interface Session {
  */
 export const sessionsApi = {
   /**
+   * Get all sessions
+   * GET /api/v1/sessions
+   */
+  async getAll(): Promise<ApiResponse<Session[]>> {
+    return apiClient.get<Session[]>('/sessions');
+  },
+
+  /**
    * Get sessions for an assembly
    * GET /api/v1/assemblies/{assembly_id}/sessions
    */

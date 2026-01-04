@@ -1,9 +1,10 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { AppView, Sitting, SittingStatus, AgendaItem } from './types';
 import { Icons } from './constants';
-import { processSittingDocuments } from './services/gemini';
-import { authApi, apiClient } from './services/api';
+import { authApi, apiClient, assembliesApi, sessionsApi, sittingsApi, documentsApi } from './services/api';
 import type { ApiError } from './services/api';
+import type { Assembly } from './services/api/assemblies';
+import type { Session } from './services/api/sessions';
 
 // Mock Initial Data
 const INITIAL_SITTINGS: Sitting[] = [
@@ -51,7 +52,17 @@ export default function App() {
   
   // New Entry specific state
   const [capturedImages, setCapturedImages] = useState<string[]>([]);
+  const [capturedFiles, setCapturedFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [assemblies, setAssemblies] = useState<Assembly[]>([]);
+  const [availableSessions, setAvailableSessions] = useState<Session[]>([]);
+  const [selectedAssemblyId, setSelectedAssemblyId] = useState<number | null>(null);
+
+  // Session filters
+  const [filterParliament, setFilterParliament] = useState('All');
+  const [filterSession, setFilterSession] = useState('All');
+  const [sessionSortField, setSessionSortField] = useState<SortField>('date');
+  const [sessionSortOrder, setSessionSortOrder] = useState<SortOrder>('desc');
 
   // Check authentication status on mount
   useEffect(() => {
@@ -71,11 +82,152 @@ export default function App() {
     checkAuth();
   }, []);
 
-  // Session filters
-  const [filterParliament, setFilterParliament] = useState('All');
-  const [filterSession, setFilterSession] = useState('All');
-  const [sessionSortField, setSessionSortField] = useState<SortField>('date');
-  const [sessionSortOrder, setSessionSortOrder] = useState<SortOrder>('desc');
+  // Fetch assemblies when new_entry view is active
+  useEffect(() => {
+    if (view === 'new_entry' && isLoggedIn) {
+      const fetchAssemblies = async () => {
+        try {
+          const response = await assembliesApi.getAll();
+          console.log('Assemblies API response:', response);
+          if (response.success && response.data) {
+            console.log('Assemblies loaded:', response.data);
+            setAssemblies(response.data);
+          } else {
+            console.warn('Assemblies API returned no data:', response);
+          }
+        } catch (error) {
+          console.error('Failed to fetch assemblies:', error);
+          alert('Failed to load assemblies. Please refresh the page.');
+        }
+      };
+      fetchAssemblies();
+    } else if (view !== 'new_entry') {
+      // Clear assemblies when leaving new_entry view
+      setAssemblies([]);
+      setSelectedAssemblyId(null);
+      setAvailableSessions([]);
+    }
+  }, [view, isLoggedIn]);
+
+  // Fetch sessions when assembly is selected
+  useEffect(() => {
+    if (selectedAssemblyId && isLoggedIn) {
+      const fetchSessions = async () => {
+        try {
+          const response = await sessionsApi.getByAssembly(selectedAssemblyId);
+          if (response.success && response.data) {
+            setAvailableSessions(response.data);
+          }
+        } catch (error) {
+          console.error('Failed to fetch sessions:', error);
+          setAvailableSessions([]);
+        }
+      };
+      fetchSessions();
+    } else {
+      setAvailableSessions([]);
+    }
+  }, [selectedAssemblyId, isLoggedIn]);
+
+  // Fetch all assemblies and sessions for filter dropdowns when logged in
+  useEffect(() => {
+    if (isLoggedIn) {
+      const fetchFilterData = async () => {
+        try {
+          // Fetch all assemblies
+          const assembliesResponse = await assembliesApi.getAll();
+          if (assembliesResponse.success && assembliesResponse.data) {
+            setAssemblies(assembliesResponse.data);
+          }
+
+          // Fetch all sessions
+          const sessionsResponse = await sessionsApi.getAll();
+          if (sessionsResponse.success && sessionsResponse.data) {
+            setAvailableSessions(sessionsResponse.data);
+          }
+        } catch (error) {
+          console.error('Failed to fetch filter data:', error);
+        }
+      };
+      fetchFilterData();
+    }
+  }, [isLoggedIn]);
+
+  // Fetch sittings when logged in and on sessions/home view
+  useEffect(() => {
+    if (!isLoggedIn || (view !== 'sessions' && view !== 'home')) {
+      return;
+    }
+
+    const fetchSittings = async () => {
+      try {
+        // Build filters from current filter state
+        const filters: any = {};
+        if (filterParliament !== 'All' && assemblies.length > 0) {
+          // Find assembly ID by name
+          const assembly = assemblies.find(a => a.name === filterParliament);
+          if (assembly) {
+            filters.assembly = assembly.id;
+          }
+        }
+        if (filterSession !== 'All' && availableSessions.length > 0) {
+          // Find session ID by name
+          const session = availableSessions.find(s => s.name === filterSession);
+          if (session) {
+            filters.session = session.id;
+          }
+        }
+
+        const response = await sittingsApi.list({ ...filters, per_page: 100 });
+        if (response.success && response.data) {
+          // Map API response to frontend format
+          const mappedSittings: Sitting[] = response.data.map((sitting: any) => ({
+            id: String(sitting.id),
+            assembly: sitting.assembly || 'Unknown Assembly',
+            session: sitting.session || 'Unknown Session',
+            date: sitting.date,
+            time: sitting.time || '',
+            status: sitting.status === 'Official Record' ? SittingStatus.OFFICIAL : SittingStatus.DRAFT,
+            summaryText: sitting.summaryText || null,
+            agendaItems: sitting.agendaItems || [],
+            bills: sitting.bills || [],
+          }));
+          setSittings(mappedSittings);
+        }
+      } catch (error) {
+        console.error('Failed to fetch sittings:', error);
+        // Keep existing sittings on error
+      }
+    };
+
+    fetchSittings();
+  }, [isLoggedIn, view, filterParliament, filterSession, assemblies, availableSessions]);
+
+  // Handle delete sitting
+  const handleDeleteSitting = async (sittingId: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent card click
+    
+    if (!confirm('Are you sure you want to delete this sitting? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      setIsProcessing(true);
+      const response = await sittingsApi.delete(Number(sittingId));
+      if (response.success) {
+        // Remove from local state
+        setSittings(prev => prev.filter(s => s.id !== sittingId));
+        // Note: The useEffect will automatically refetch when filters change
+      } else {
+        alert(response.message || 'Failed to delete sitting');
+      }
+    } catch (error: any) {
+      console.error('Failed to delete sitting:', error);
+      alert(error.message || 'Failed to delete sitting. Please try again.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   const navigate = (to: AppView, params?: { id?: string, agendaId?: string }) => {
     if (params?.id) setSelectedId(params.id);
@@ -86,8 +238,18 @@ export default function App() {
 
   const currentSitting = sittings.find(s => s.id === selectedId);
 
-  const parliaments = useMemo(() => ['All', ...new Set(sittings.map(s => s.assembly))], [sittings]);
-  const sessions = useMemo(() => ['All', ...new Set(sittings.map(s => s.session))], [sittings]);
+  // Get unique parliaments and sessions from both sittings and API data
+  const parliaments = useMemo(() => {
+    const fromSittings = sittings.map(s => s.assembly);
+    const fromAssemblies = assemblies.map(a => a.name);
+    return ['All', ...new Set([...fromSittings, ...fromAssemblies])];
+  }, [sittings, assemblies]);
+  
+  const sessions = useMemo(() => {
+    const fromSittings = sittings.map(s => s.session);
+    const fromApiSessions = availableSessions.map(s => s.name);
+    return ['All', ...new Set([...fromSittings, ...fromApiSessions])];
+  }, [sittings, availableSessions]);
 
   const filteredAndSortedSessions = useMemo(() => {
     let result = [...sittings];
@@ -155,6 +317,10 @@ export default function App() {
     const remainingSlots = 5 - capturedImages.length;
     const filesToProcess = files.slice(0, remainingSlots);
 
+    // Store File objects
+    setCapturedFiles(prev => [...prev, ...filesToProcess].slice(0, 5));
+
+    // Store data URLs for preview
     filesToProcess.forEach((file: File) => {
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -168,41 +334,134 @@ export default function App() {
 
   const removeImage = (index: number) => {
     setCapturedImages(prev => prev.filter((_, i) => i !== index));
+    setCapturedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   const submitNewSitting = async () => {
-    if (!activeDraft.assembly || !activeDraft.session || !activeDraft.date || !activeDraft.time || capturedImages.length === 0) {
-      alert("Please provide all metadata and capture at least one document photo.");
+    // Debug logging
+    console.log('Validation check:', {
+      assembly: activeDraft.assembly,
+      session: activeDraft.session,
+      date: activeDraft.date,
+      time: activeDraft.time,
+      capturedFilesCount: capturedFiles.length,
+      capturedImagesCount: capturedImages.length
+    });
+
+    if (!activeDraft.assembly || !activeDraft.session || !activeDraft.date || !activeDraft.time || capturedFiles.length === 0) {
+      const missingFields = [];
+      if (!activeDraft.assembly) missingFields.push('Assembly');
+      if (!activeDraft.session) missingFields.push('Session');
+      if (!activeDraft.date) missingFields.push('Date');
+      if (!activeDraft.time) missingFields.push('Time');
+      if (capturedFiles.length === 0) missingFields.push('at least one document photo');
+      
+      alert(`Please provide all metadata and capture at least one document photo.\n\nMissing: ${missingFields.join(', ')}`);
       return;
     }
 
     setIsProcessing(true);
 
     try {
-      const result = await processSittingDocuments(capturedImages);
-      
-      const newSitting: Sitting = {
-        id: `s${Date.now()}`,
-        assembly: activeDraft.assembly!,
-        session: activeDraft.session!,
-        date: activeDraft.date!,
-        time: activeDraft.time!,
-        status: SittingStatus.DRAFT,
-        agendaItems: result.agendaItems.map((item: any, idx: number) => ({
-          ...item,
-          id: `ai-${Date.now()}-${idx}`
-        })),
-        bills: [],
-        summaryText: result.summaryText,
-      };
+      // Step 1: Find the selected assembly and session from already-loaded data
+      if (!selectedAssemblyId) {
+        alert('Please select an assembly.');
+        setIsProcessing(false);
+        return;
+      }
 
-      setSittings([newSitting, ...sittings]);
+      const assembly = assemblies.find(a => a.id === selectedAssemblyId);
+      if (!assembly) {
+        alert(`Assembly not found. Please try again.`);
+        setIsProcessing(false);
+        return;
+      }
+
+      const session = availableSessions.find(s => s.name === activeDraft.session);
+      if (!session) {
+        alert(`Session "${activeDraft.session}" not found. Please select a session.`);
+        setIsProcessing(false);
+        return;
+      }
+
+      // Step 3: Create a draft sitting via backend API
+      const sittingResponse = await sittingsApi.create({
+        session_id: session.id,
+        date: activeDraft.date!,
+        time_opened: activeDraft.time!,
+      });
+
+      if (!sittingResponse.success || !sittingResponse.data) {
+        throw new Error(sittingResponse.message || 'Failed to create sitting');
+      }
+
+      const createdSitting = sittingResponse.data;
+
+      // Step 4: Upload all document images and extract text using OCR
+      const uploadResults = await Promise.allSettled(
+        capturedFiles.map(file => 
+          documentsApi.upload(createdSitting.id, file, 'original_scan')
+        )
+      );
+
+      // Collect extracted text from successfully uploaded documents
+      const extractedTexts: Array<{ file_name: string; extracted_text: string | null }> = [];
+      
+      uploadResults.forEach((result, index) => {
+        if (result.status === 'fulfilled' && result.value.success && result.value.data) {
+          const document = result.value.data;
+          extractedTexts.push({
+            file_name: document.file_name,
+            extracted_text: document.extracted_text || null,
+          });
+        }
+      });
+
+      // Display extracted text in JSON format
+      const extractedTextJson = JSON.stringify(extractedTexts, null, 2);
+      console.log('Extracted Text from Documents (JSON):', extractedTextJson);
+      
+      // Also log individual document texts
+      extractedTexts.forEach((doc, index) => {
+        console.log(`Document ${index + 1} (${doc.file_name}):`, doc.extracted_text || 'No text extracted');
+      });
+
+      // Check if any uploads failed
+      const failedUploads = uploadResults.filter(result => result.status === 'rejected');
+      if (failedUploads.length > 0) {
+        console.error('Some document uploads failed:', failedUploads);
+        
+        // Check for 413 errors (file too large)
+        const fileSizeErrors = failedUploads.filter(result => {
+          if (result.status === 'rejected' && result.reason) {
+            const error = result.reason as any;
+            return error?.response?.status === 413 || error?.message?.includes('413') || error?.message?.includes('too large');
+          }
+          return false;
+        });
+
+        if (fileSizeErrors.length > 0) {
+          alert(`Sitting created successfully, but ${fileSizeErrors.length} document(s) failed to upload because the file size is too large (maximum 2MB per file). Please compress or resize your images and try again.\n\nExtracted text from ${extractedTexts.length} document(s) has been logged to the console in JSON format.`);
+        } else {
+          // Continue anyway - some documents were uploaded
+          alert(`Sitting created successfully, but ${failedUploads.length} document(s) failed to upload. Please try uploading them again.\n\nExtracted text from ${extractedTexts.length} document(s) has been logged to the console in JSON format.`);
+        }
+      } else {
+        alert(`Sitting created and documents uploaded successfully!\n\nExtracted text from ${extractedTexts.length} document(s) has been logged to the console in JSON format.`);
+      }
+
+      // Step 5: Success - clear form and navigate
       setCapturedImages([]);
+      setCapturedFiles([]);
       setActiveDraft({});
+      setSelectedAssemblyId(null);
+      setAvailableSessions([]);
+      
       navigate('sessions');
-    } catch (err) {
-      alert("Failed to process document. Please try again.");
-      console.error(err);
+    } catch (err: any) {
+      console.error('Error creating sitting:', err);
+      const errorMessage = err?.message || err?.response?.data?.message || 'Failed to create sitting and upload documents. Please try again.';
+      alert(errorMessage);
     } finally {
       setIsProcessing(false);
     }
@@ -378,7 +637,7 @@ export default function App() {
           <div className="space-y-4">
             {filteredAndSortedSessions.map((sitting) => (
               <div key={sitting.id} onClick={() => navigate('session_summary', { id: sitting.id })} className="bg-white border border-slate-200 rounded-2xl p-6 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer">
-                <div className="flex items-start justify-between">
+                <div className="flex items-start justify-between gap-4">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
                       <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{sitting.assembly}</span>
@@ -388,12 +647,24 @@ export default function App() {
                     <h4 className="text-lg font-black text-slate-800 mb-1">{sitting.date} at {sitting.time}</h4>
                     <p className="text-sm text-slate-600 line-clamp-2">{sitting.summaryText || 'No summary available'}</p>
                   </div>
-                  <div className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${
-                    sitting.status === SittingStatus.OFFICIAL 
-                      ? 'bg-emerald-50 text-emerald-600' 
-                      : 'bg-amber-50 text-amber-600'
-                  }`}>
-                    {sitting.status}
+                  <div className="flex items-center gap-2">
+                    {sitting.status === SittingStatus.DRAFT && (
+                      <button
+                        onClick={(e) => handleDeleteSitting(sitting.id, e)}
+                        disabled={isProcessing}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                        title="Delete sitting"
+                      >
+                        <Icons.Trash />
+                      </button>
+                    )}
+                    <div className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${
+                      sitting.status === SittingStatus.OFFICIAL 
+                        ? 'bg-emerald-50 text-emerald-600' 
+                        : 'bg-amber-50 text-amber-600'
+                    }`}>
+                      {sitting.status}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -414,12 +685,52 @@ export default function App() {
             <h3 className="text-lg font-black text-slate-800">Basic Details</h3>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Assembly</label>
-                <input type="text" value={activeDraft.assembly || ''} onChange={(e) => setActiveDraft({...activeDraft, assembly: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-blue-600/5 focus:border-blue-400" placeholder="10th Parliament" />
+                <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Assembly *</label>
+                <select
+                  value={selectedAssemblyId || ''}
+                  onChange={(e) => {
+                    const assemblyId = e.target.value ? parseInt(e.target.value) : null;
+                    setSelectedAssemblyId(assemblyId);
+                    const selectedAssembly = assemblies.find(a => a.id === assemblyId);
+                    // Update assembly name and clear session when assembly changes
+                    setActiveDraft({
+                      ...activeDraft,
+                      assembly: selectedAssembly?.name || '',
+                      session: '', // Clear session when assembly changes
+                    });
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-blue-600/5 focus:border-blue-400"
+                  required
+                >
+                  <option value="">{assemblies.length === 0 ? 'Loading assemblies...' : 'Select Assembly'}</option>
+                  {assemblies.map(assembly => (
+                    <option key={assembly.id} value={assembly.id}>
+                      {assembly.name}
+                    </option>
+                  ))}
+                </select>
+                {assemblies.length === 0 && (
+                  <p className="text-xs text-slate-500 mt-1">No assemblies available. Please check if you're logged in and the backend is running.</p>
+                )}
               </div>
               <div>
-                <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Session</label>
-                <input type="text" value={activeDraft.session || ''} onChange={(e) => setActiveDraft({...activeDraft, session: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-blue-600/5 focus:border-blue-400" placeholder="2nd Session" />
+                <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Session *</label>
+                <select
+                  value={activeDraft.session || ''}
+                  onChange={(e) => {
+                    setActiveDraft({...activeDraft, session: e.target.value});
+                  }}
+                  disabled={!selectedAssemblyId || availableSessions.length === 0}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-blue-600/5 focus:border-blue-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                  required
+                >
+                  <option value="">{selectedAssemblyId ? 'Select Session' : 'Select Assembly first'}</option>
+                  {availableSessions.map(session => (
+                    <option key={session.id} value={session.name}>
+                      {session.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Date</label>

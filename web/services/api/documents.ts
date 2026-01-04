@@ -19,6 +19,7 @@ export interface Document {
   file_name: string;
   mime_type: string;
   file_size: number;
+  extracted_text?: string | null;
   is_read_only: boolean;
   created_at: string;
   updated_at: string;

@@ -109,6 +109,14 @@ export const sittingsApi = {
   async officialize(id: number): Promise<ApiResponse<Sitting>> {
     return apiClient.post<Sitting>(`/sittings/${id}/officialize`);
   },
+
+  /**
+   * Delete a sitting (only draft sittings)
+   * DELETE /api/v1/sittings/{id}
+   */
+  async delete(id: number): Promise<ApiResponse<void>> {
+    return apiClient.delete<void>(`/sittings/${id}`);
+  },
 };
 
 
