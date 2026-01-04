@@ -44,15 +44,24 @@ class OcrService
             Log::info("OCR Service: Attempting API extraction. Driver: {$driver}, Key Present: " . ($apiKey !== 'helloworld' ? 'Yes' : 'Using Demo'));
 
             $filePath = $file instanceof UploadedFile ? $file->getRealPath() : $file;
-            Log::info("OCR Service: File path: {$filePath}");
+            $fileName = $file instanceof UploadedFile ? $file->getClientOriginalName() : basename($filePath);
+            
+            Log::info("OCR Service: File path: {$filePath}, Name: {$fileName}");
 
+            $fileStream = fopen($filePath, 'r');
+            
             $response = Http::asMultipart()
+                ->attach(
+                    'file', 
+                    $fileStream, 
+                    $fileName
+                )
                 ->post('https://api.ocr.space/parse/image', [
                     'apikey' => $apiKey,
-                    'file' => fopen($filePath, 'r'),
                     'detectOrientation' => 'true',
                     'scale' => 'true',
                     'OCREngine' => '1',
+                    'filetype' => pathinfo($fileName, PATHINFO_EXTENSION) ?: 'jpg'
                 ]);
 
             Log::info("OCR Service: API Response Status: " . $response->status());
