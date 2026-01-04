@@ -33,7 +33,7 @@ if (typeof window !== 'undefined') {
   console.log('🔧 API Configuration:', {
     'VITE_API_BASE_URL (env)': import.meta.env.VITE_API_BASE_URL,
     'API_BASE_URL (resolved)': API_BASE_URL,
-    'Expected format': 'https://your-domain.com/backend/api/v1'
+    'Expected format': 'https://nas.namelesss.store/backend/public/api/v1'
   });
 }
 

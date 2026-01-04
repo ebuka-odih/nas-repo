@@ -33,7 +33,8 @@ This contains everything you need to run your app locally.
 
 - `VITE_API_BASE_URL`: The base URL for the backend API (default: `http://localhost:8000/api/v1`)
   - **IMPORTANT**: Must end with `/api/v1`
-  - Example for production: `https://nas.namelesss.store/backend/api/v1`
+  - Example for production: `https://nas.namelesss.store/backend/public/api/v1`
+  - **Note**: The backend is served from `/backend/public/`, so include `/public` in the URL
   - The code will automatically add `/v1` if you only provide `/api`, but it's best to include it explicitly
 
 ## Debugging API Issues
@@ -47,13 +48,14 @@ If you're getting 404 errors:
 
 2. **Verify your environment variable**:
    - In Vercel: Go to Project Settings → Environment Variables
-   - Make sure `VITE_API_BASE_URL` is set to: `https://nas.namelesss.store/backend/api/v1`
-   - **Note**: Must include `/api/v1` at the end
+   - Make sure `VITE_API_BASE_URL` is set to: `https://nas.namelesss.store/backend/public/api/v1`
+   - **Note**: Must include `/public/api/v1` at the end (the backend is served from `/backend/public/`)
 
 3. **Test the backend directly**:
-   - `https://nas.namelesss.store/backend/api` - Should return API info JSON
-   - `https://nas.namelesss.store/backend/api/v1/login` - Should be the login endpoint
+   - `https://nas.namelesss.store/backend/public/api` - Should return API info JSON
+   - `https://nas.namelesss.store/backend/public/api/v1/login` - Should be the login endpoint
 
 4. **Common issues**:
-   - ❌ `VITE_API_BASE_URL=https://nas.namelesss.store/backend/api` (missing `/v1`)
-   - ✅ `VITE_API_BASE_URL=https://nas.namelesss.store/backend/api/v1` (correct)
+   - ❌ `VITE_API_BASE_URL=https://nas.namelesss.store/backend/api/v1` (missing `/public`)
+   - ❌ `VITE_API_BASE_URL=https://nas.namelesss.store/backend/public/api` (missing `/v1`)
+   - ✅ `VITE_API_BASE_URL=https://nas.namelesss.store/backend/public/api/v1` (correct)

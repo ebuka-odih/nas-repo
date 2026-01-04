@@ -19,7 +19,7 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => array_filter([
+    'allowed_origins' => array_values(array_filter([
         'http://localhost:3000',
         'http://127.0.0.1:3000',
         env('FRONTEND_URL'),
@@ -27,7 +27,9 @@ return [
         'https://nas-repo.vercel.app',
         // Allow additional origins from comma-separated env var
         ...(env('CORS_ALLOWED_ORIGINS') ? explode(',', env('CORS_ALLOWED_ORIGINS')) : []),
-    ]),
+    ], function($value) {
+        return !empty($value);
+    })),
 
     'allowed_origins_patterns' => [
         // Allow all Vercel preview deployments
