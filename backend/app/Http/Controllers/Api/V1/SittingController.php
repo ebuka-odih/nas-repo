@@ -153,7 +153,7 @@ class SittingController extends Controller
     public function destroy(Request $request, int $id): JsonResponse
     {
         try {
-            $this->service->delete($id, $request->user()->id);
+            $this->service->delete($id, $request->user());
 
             return response()->json([
                 'success' => true,

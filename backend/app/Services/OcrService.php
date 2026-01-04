@@ -58,9 +58,11 @@ class OcrService
                 )
                 ->post('https://api.ocr.space/parse/image', [
                     'apikey' => $apiKey,
+                    // 'file' is attached above
                     'detectOrientation' => 'true',
                     'scale' => 'true',
                     'OCREngine' => '1',
+                    'isTable' => 'true', // Better for structural docs
                     'filetype' => pathinfo($fileName, PATHINFO_EXTENSION) ?: 'jpg'
                 ]);
 

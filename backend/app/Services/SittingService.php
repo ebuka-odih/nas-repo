@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\DTOs\CreateSittingDTO;
 use App\Models\Sitting;
+use App\Models\User;
 use App\Repositories\SittingRepository;
 use Illuminate\Support\Facades\DB;
 
@@ -106,10 +107,11 @@ class SittingService
 
     /**
      * Delete a sitting (only draft sittings can be deleted)
+     * Admins can delete any draft sitting, clerks can only delete their own
      */
-    public function delete(int $sittingId, int $userId): void
+    public function delete(int $sittingId, User $user): void
     {
-        DB::transaction(function () use ($sittingId, $userId) {
+        DB::transaction(function () use ($sittingId, $user) {
             $sitting = $this->repository->findOrFail($sittingId);
 
             // Only draft sittings can be deleted
@@ -117,10 +119,9 @@ class SittingService
                 throw new \Exception('Only draft sittings can be deleted');
             }
 
-            // Only the creator or admin can delete (check if user is creator or has admin role)
-            // For now, we'll allow deletion if user is the creator
-            // You can add role checking here if needed
-            if ($sitting->created_by !== $userId) {
+            // Admins can delete any draft sitting
+            // Clerks can only delete sittings they created
+            if (!$user->isAdmin() && $sitting->created_by !== $user->id) {
                 throw new \Exception('You can only delete sittings you created');
             }
 
