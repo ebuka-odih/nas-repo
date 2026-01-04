@@ -22,14 +22,18 @@ class OcrService
         if (config('app.ocr_driver') !== 'api') {
             try {
                 $path = $file instanceof UploadedFile ? $file->getRealPath() : $file;
-                return (new TesseractOCR($path))->run();
+                $text = (new TesseractOCR($path))->run();
             } catch (\Exception $e) {
                 Log::warning('Local Tesseract failed or not found, falling back to API: ' . $e->getMessage());
                 // Fallthrough to API
             }
         }
 
-        return $this->extractViaApi($file);
+        if (!isset($text)) {
+            $text = $this->extractViaApi($file);
+        }
+
+        return $this->cleanText($text);
     }
 
     /**
@@ -177,5 +181,22 @@ class OcrService
             Log::error('OCR Service: Compression failed: ' . $e->getMessage());
             return null;
         }
+    }
+
+    /**
+     * Clean extracted text by removing unwanted strings
+     */
+    protected function cleanText(?string $text): ?string
+    {
+        if (empty($text)) {
+            return $text;
+        }
+
+        // Use regex for more flexible matching (extra spaces, newlines, optional punctuation)
+        $patterns = [
+            '/PRINTED\s+BY\s+NATIONAL\s+ASSEMBLY\s+PRESS,?\s+ABUJA/iu',
+        ];
+
+        return preg_replace($patterns, '', $text);
     }
 }

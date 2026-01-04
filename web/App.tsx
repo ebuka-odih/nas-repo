@@ -39,6 +39,7 @@ type SortField = 'date' | 'assembly' | 'session';
 type SortOrder = 'asc' | 'desc';
 
 // Simple parser for document text to apply formatting
+// Simple parser for document text to apply formatting
 const DocumentFormatter = ({ text }: { text: string }) => {
   if (!text) return null;
 
@@ -46,45 +47,64 @@ const DocumentFormatter = ({ text }: { text: string }) => {
   const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
 
   return (
-    <div className="font-sans text-slate-800 leading-relaxed text-sm space-y-2">
-      {lines.map((line, i) => {
-        const trimmed = line.trim();
+    <div className="bg-slate-100 p-2 sm:p-4 md:p-8 rounded-xl overflow-auto border border-slate-200">
+      <div className="document-page p-3 sm:p-6 md:p-12 lg:p-16 text-slate-900 leading-relaxed font-serif text-sm sm:text-base relative">
+        <div className="absolute top-0 left-0 w-full h-full pointer-events-none opacity-[0.03]" style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '20px 20px' }}></div>
 
-        // Match numbered headers (e.g., "1. Presentation of Bills:")
-        // We look for a number at the start, followed by a dot
-        const headerMatch = trimmed.match(/^(\d+)\.\s+(.*)/);
+        {lines.map((line, i) => {
+          const trimmed = line.trim();
 
-        // Match roman numerals (e.g., "(i)", "(ii)")
-        const subItemMatch = trimmed.match(/^(\([ivx]+\))\s+(.*)/i);
+          // Match numbered headers (e.g., "1. Presentation of Bills:")
+          const headerMatch = trimmed.match(/^(\d+)\.\s+(.*)/);
 
-        if (headerMatch) {
+          // Match roman numerals (e.g., "(i)", "(ii)") - Strict check to avoid false positives
+          const subItemMatch = trimmed.match(/^(\([ivx]+\))\s+(.*)/i);
+
+          // Detect center-aligned heavy headers (e.g. "SENATE OF THE")
+          const isHeavyHeader = trimmed === trimmed.toUpperCase() && trimmed.length < 50 && !headerMatch;
+
+          if (isHeavyHeader) {
+            return (
+              <div key={i} className="text-center font-bold text-lg md:text-xl tracking-wide py-1 text-slate-900 border-none">
+                {trimmed}
+              </div>
+            );
+          }
+
+          if (headerMatch) {
+            return (
+              <div key={i} className="flex gap-4 pt-6 pb-2 items-baseline">
+                <span className="font-bold text-slate-900 text-lg min-w-[20px]">{headerMatch[1]}.</span>
+                <span className="font-bold text-slate-900 text-lg uppercase tracking-tight">{headerMatch[2]}</span>
+              </div>
+            );
+          }
+
+          if (subItemMatch) {
+            return (
+              <div key={i} className="flex gap-4 ml-8 pl-4 py-1.5 items-baseline">
+                <span className="font-medium text-slate-600 min-w-[28px] italic">{subItemMatch[1]}</span>
+                <span className="text-slate-800">{subItemMatch[2]}</span>
+              </div>
+            );
+          }
+
+          // Regular content
+          const isTitle = trimmed === trimmed.toUpperCase() && trimmed.length > 5;
+
           return (
-            <div key={i} className="flex gap-3 pt-4 pb-1">
-              <span className="font-black text-slate-900 text-base">{headerMatch[1]}.</span>
-              <span className="font-bold text-slate-900 text-base uppercase tracking-tight">{headerMatch[2]}</span>
+            <div key={i} className={`ml-8 ${isTitle ? 'font-bold text-slate-800 pt-3' : 'text-slate-700 py-0.5 text-justify'}`}>
+              {trimmed}
             </div>
           );
-        }
+        })}
 
-        if (subItemMatch) {
-          return (
-            <div key={i} className="flex gap-3 ml-4 pl-4 border-l-2 border-slate-100 py-1">
-              <span className="font-bold text-slate-500 min-w-[24px]">{subItemMatch[1]}</span>
-              <span className="text-slate-700">{subItemMatch[2]}</span>
-            </div>
-          );
-        }
-
-        // Regular content (indented to align with headers)
-        // We detect if it looks like a "Title" line (ALL CAPS) vs normal text
-        const isAllCaps = trimmed === trimmed.toUpperCase() && trimmed.length > 5;
-
-        return (
-          <div key={i} className={`ml-8 ${isAllCaps ? 'font-bold text-slate-700 pt-2' : 'text-slate-600'}`}>
-            {trimmed}
-          </div>
-        );
-      })}
+        {/* Page Footer Simulation */}
+        <div className="mt-16 pt-8 border-t border-slate-200 flex justify-between text-xs text-slate-400 font-sans">
+          <span>Official Record</span>
+          <span>Page 1 of 1</span>
+        </div>
+      </div>
     </div>
   );
 };
@@ -110,6 +130,12 @@ export default function App() {
   const [selectedAssemblyId, setSelectedAssemblyId] = useState<number | null>(null);
   const [detailedSitting, setDetailedSitting] = useState<Sitting | null>(null);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+
+  // Success modal state
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [createdSittingId, setCreatedSittingId] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string>('');
+  const [hasUploadErrors, setHasUploadErrors] = useState(false);
 
   // Session filters
   const [filterParliament, setFilterParliament] = useState('All');
@@ -517,8 +543,12 @@ export default function App() {
 
       // Check if any uploads failed
       const failedUploads = uploadResults.filter(result => result.status === 'rejected');
+      let message = '';
+      let hasErrors = false;
+
       if (failedUploads.length > 0) {
         console.error('Some document uploads failed:', failedUploads);
+        hasErrors = true;
 
         // Check for 413 errors (file too large)
         const fileSizeErrors = failedUploads.filter(result => {
@@ -530,23 +560,26 @@ export default function App() {
         });
 
         if (fileSizeErrors.length > 0) {
-          alert(`Sitting created successfully, but ${fileSizeErrors.length} document(s) failed to upload because the file size is too large (maximum 2MB per file). Please compress or resize your images and try again.\n\nExtracted text from ${extractedTexts.length} document(s) has been logged to the console in JSON format.`);
+          message = `Sitting created successfully, but ${fileSizeErrors.length} document(s) failed to upload because the file size is too large (maximum 5MB per file). Please compress or resize your images and try uploading them again.`;
         } else {
-          // Continue anyway - some documents were uploaded
-          alert(`Sitting created successfully, but ${failedUploads.length} document(s) failed to upload. Please try uploading them again.\n\nExtracted text from ${extractedTexts.length} document(s) has been logged to the console in JSON format.`);
+          message = `Sitting created successfully, but ${failedUploads.length} document(s) failed to upload. Please try uploading them again.`;
         }
       } else {
-        alert(`Sitting created and documents uploaded successfully!\n\nExtracted text from ${extractedTexts.length} document(s) has been logged to the console in JSON format.`);
+        message = `Sitting created and ${extractedTexts.length} document(s) uploaded successfully!`;
       }
 
-      // Step 5: Success - clear form and navigate
+      // Set success modal state
+      setCreatedSittingId(String(createdSitting.id));
+      setSuccessMessage(message);
+      setHasUploadErrors(hasErrors);
+      setShowSuccessModal(true);
+
+      // Step 5: Success - clear form (but don't navigate yet, wait for user action in modal)
       setCapturedImages([]);
       setCapturedFiles([]);
       setActiveDraft({});
       setSelectedAssemblyId(null);
       setAvailableSessions([]);
-
-      navigate('sessions');
     } catch (err: any) {
       console.error('Error creating sitting:', err);
       const errorMessage = err?.message || err?.response?.data?.message || 'Failed to create sitting and upload documents. Please try again.';
@@ -558,16 +591,16 @@ export default function App() {
 
   const TopBar = ({ title, showBack }: { title: string, showBack?: boolean }) => (
     <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200 h-16 flex items-center justify-center w-full shadow-sm">
-      <div className="max-w-5xl w-full px-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="max-w-5xl w-full px-4 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
           {showBack && (
-            <button onClick={() => setView('home')} className="text-slate-600 hover:text-blue-600 transition-colors p-2 rounded-lg hover:bg-slate-50">
+            <button onClick={() => setView('home')} className="text-slate-600 hover:text-blue-600 transition-colors p-2 rounded-lg hover:bg-slate-50 flex-shrink-0">
               <Icons.ArrowLeft />
             </button>
           )}
-          <h1 className="text-lg font-bold text-slate-800 truncate tracking-tight">{title}</h1>
+          <h1 className="text-sm sm:text-lg font-bold text-slate-800 truncate tracking-tight flex-1 min-w-0">{title}</h1>
         </div>
-        <div className="hidden sm:block text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] border border-slate-200 px-3 py-1 rounded-lg bg-slate-50/50">
+        <div className="hidden sm:block text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] border border-slate-200 px-3 py-1 rounded-lg bg-slate-50/50 flex-shrink-0">
           Official Registry
         </div>
       </div>
@@ -579,8 +612,7 @@ export default function App() {
       <div className="max-w-xl w-full flex justify-around items-center px-4">
         <NavIcon label="Home" icon={<Icons.Home />} active={view === 'home'} onClick={() => setView('home')} />
         <NavIcon label="New" icon={<Icons.Plus />} active={view === 'new_entry'} onClick={() => setView('new_entry')} />
-        <NavIcon label="Sessions" icon={<Icons.Sessions />} active={view === 'sessions'} onClick={() => setView('sessions')} />
-        <NavIcon label="Search" icon={<Icons.Search />} active={view === 'search'} onClick={() => setView('search')} />
+        <NavIcon label="Sitting" icon={<Icons.Sessions />} active={view === 'sessions'} onClick={() => setView('sessions')} />
         <NavIcon label="Profile" icon={<Icons.User />} active={view === 'profile'} onClick={() => setView('profile')} />
       </div>
     </nav>
@@ -598,6 +630,92 @@ export default function App() {
       {children}
     </div>
   );
+
+  const SuccessModal = () => {
+    if (!showSuccessModal) return null;
+
+    const handleViewSitting = () => {
+      setShowSuccessModal(false);
+      if (createdSittingId) {
+        navigate('session_summary', { id: createdSittingId });
+      }
+    };
+
+    const handleAddNew = () => {
+      setShowSuccessModal(false);
+      setCreatedSittingId(null);
+      setSuccessMessage('');
+      setHasUploadErrors(false);
+      // Stay on new_entry view, form is already cleared
+      setView('new_entry');
+    };
+
+    const handleClose = () => {
+      setShowSuccessModal(false);
+      setCreatedSittingId(null);
+      setSuccessMessage('');
+      setHasUploadErrors(false);
+      navigate('sessions');
+    };
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={handleClose}>
+        <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-6" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center ${hasUploadErrors ? 'bg-amber-100' : 'bg-emerald-100'}`}>
+                {hasUploadErrors ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+              </div>
+              <div>
+                <h3 className={`text-lg font-black ${hasUploadErrors ? 'text-amber-900' : 'text-emerald-900'}`}>
+                  {hasUploadErrors ? 'Sitting Created with Warnings' : 'Sitting Created Successfully'}
+                </h3>
+                <p className="text-sm text-slate-600 mt-1">{successMessage}</p>
+              </div>
+            </div>
+            <button
+              onClick={handleClose}
+              className="text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-lg hover:bg-slate-100"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={handleViewSitting}
+              className="flex-1 bg-blue-600 text-white text-sm font-black uppercase tracking-widest py-3 px-4 rounded-xl hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+              View Sitting
+            </button>
+            <button
+              onClick={handleAddNew}
+              className="flex-1 bg-slate-100 text-slate-800 text-sm font-black uppercase tracking-widest py-3 px-4 rounded-xl hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Add New
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const renderLogin = () => (
     <div className="min-h-screen flex items-center justify-center p-4 bg-slate-900 overflow-hidden relative">
@@ -711,16 +829,25 @@ export default function App() {
 
   const renderSessions = () => (
     <>
-      <TopBar title="Sessions" showBack />
+      <TopBar title="Sittings" showBack />
       <ViewContainer>
         <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row gap-4">
-            <select value={filterParliament} onChange={(e) => setFilterParliament(e.target.value)} className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-blue-600/5 focus:border-blue-400">
-              {parliaments.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
-            <select value={filterSession} onChange={(e) => setFilterSession(e.target.value)} className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-blue-600/5 focus:border-blue-400">
-              {sessions.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
+          <div className="space-y-4">
+            <input 
+              type="text" 
+              value={searchQuery} 
+              onChange={(e) => setSearchQuery(e.target.value)} 
+              placeholder="Search sittings..." 
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-6 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-blue-600/5 focus:border-blue-400" 
+            />
+            <div className="flex flex-col sm:flex-row gap-4">
+              <select value={filterParliament} onChange={(e) => setFilterParliament(e.target.value)} className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-blue-600/5 focus:border-blue-400">
+                {parliaments.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+              <select value={filterSession} onChange={(e) => setFilterSession(e.target.value)} className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-blue-600/5 focus:border-blue-400">
+                {sessions.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
           </div>
           <div className="space-y-4">
             {filteredAndSortedSessions.map((sitting) => (
@@ -941,13 +1068,13 @@ export default function App() {
         <TopBar title={`${sitting.date} - ${sitting.time}`} showBack />
         <ViewContainer>
           <div className="space-y-6">
-            <div className="bg-white border border-slate-200 rounded-2xl p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h2 className="text-2xl font-black text-slate-800">{sitting.assembly}</h2>
-                  <p className="text-sm text-slate-600">{sitting.session}</p>
+            <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-6">
+              <div className="flex items-start sm:items-center justify-between mb-4 gap-3">
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-lg sm:text-xl md:text-2xl font-black text-slate-800 break-words">{sitting.assembly}</h2>
+                  <p className="text-xs sm:text-sm text-slate-600 mt-1">{sitting.session}</p>
                 </div>
-                <div className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest ${sitting.status === SittingStatus.OFFICIAL
+                <div className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[10px] font-black uppercase tracking-widest flex-shrink-0 ${sitting.status === SittingStatus.OFFICIAL
                   ? 'bg-emerald-50 text-emerald-600'
                   : 'bg-amber-50 text-amber-600'
                   }`}>
@@ -964,18 +1091,18 @@ export default function App() {
               <div className="space-y-6">
                 <h3 className="text-lg font-black text-slate-800 px-2 uppercase tracking-widest text-xs text-slate-400">Official Documents</h3>
                 {sitting.documents.map((doc, idx) => (
-                  <div key={doc.id || idx} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                    <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-                      <h4 className="font-bold text-slate-800 text-sm">{doc.file_name}</h4>
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{doc.type}</span>
+                  <div key={doc.id || idx} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm -mx-4 sm:mx-0">
+                    <div className="bg-slate-50 px-3 sm:px-6 py-3 sm:py-4 border-b border-slate-200 flex items-center justify-between gap-2">
+                      <h4 className="font-bold text-slate-800 text-xs sm:text-sm truncate flex-1 min-w-0">{doc.file_name}</h4>
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex-shrink-0">{doc.type}</span>
                     </div>
-                    <div className="p-6">
+                    <div className="p-0 sm:p-4 md:p-6">
                       {doc.extracted_text ? (
-                        <div className="bg-white p-4 rounded-xl border border-slate-100">
+                        <div className="bg-white rounded-xl border border-slate-100">
                           <DocumentFormatter text={doc.extracted_text} />
                         </div>
                       ) : (
-                        <div className="text-center py-8 text-slate-400 text-sm font-medium">
+                        <div className="text-center py-8 px-4 text-slate-400 text-sm font-medium">
                           No text content extracted from this document.
                         </div>
                       )}
@@ -1033,20 +1160,29 @@ export default function App() {
     return renderLogin();
   }
 
-  switch (view) {
-    case 'home':
-      return renderHome();
-    case 'sessions':
-      return renderSessions();
-    case 'new_entry':
-      return renderNewEntry();
-    case 'search':
-      return renderSearch();
-    case 'profile':
-      return renderProfile();
-    case 'session_summary':
-      return renderSessionSummary();
-    default:
-      return renderHome();
-  }
+  return (
+    <>
+      <SuccessModal />
+      {(() => {
+        switch (view) {
+          case 'home':
+            return renderHome();
+          case 'sessions':
+            return renderSessions();
+          case 'new_entry':
+            return renderNewEntry();
+          case 'search':
+            // Redirect search view to sessions (search is now integrated in sessions)
+            setView('sessions');
+            return renderSessions();
+          case 'profile':
+            return renderProfile();
+          case 'session_summary':
+            return renderSessionSummary();
+          default:
+            return renderHome();
+        }
+      })()}
+    </>
+  );
 }

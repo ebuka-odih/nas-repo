@@ -2,3 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+.document-page {
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto;
+  background: white;
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+}
+
+@media (max-width: 800px) {
+  .document-page {
+    width: 100%;
+    min-height: auto;
+  }
+}
+
