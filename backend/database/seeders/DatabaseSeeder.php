@@ -26,5 +26,9 @@ class DatabaseSeeder extends Seeder
         $this->call([
             AssemblySeeder::class,
         ]);
+
+        $this->call([
+            AdminUserSeeder::class,
+        ]);
     }
 }
