@@ -17,4 +17,28 @@ require __DIR__.'/../vendor/autoload.php';
 /** @var Application $app */
 $app = require_once __DIR__.'/../bootstrap/app.php';
 
+// Handle CORS preflight requests before Laravel processes them
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    $origin = $_SERVER['HTTP_ORIGIN'] ?? '*';
+    
+    // Check if origin is allowed (simple check - middleware will do full validation)
+    $allowedOrigins = [
+        'https://nas-repo.vercel.app',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+    ];
+    
+    $isAllowed = in_array($origin, $allowedOrigins) || preg_match('#^https://.*\.vercel\.app$#', $origin);
+    
+    if ($isAllowed) {
+        header("Access-Control-Allow-Origin: {$origin}");
+        header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+        header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, Accept');
+        header('Access-Control-Allow-Credentials: true');
+        header('Access-Control-Max-Age: 86400');
+        http_response_code(200);
+        exit;
+    }
+}
+
 $app->handleRequest(Request::capture());
