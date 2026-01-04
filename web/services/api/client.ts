@@ -57,7 +57,18 @@ class ApiClient {
   private buildURL(endpoint: string): string {
     // Remove leading slash if present
     const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
-    return `${this.baseURL}/${cleanEndpoint}`;
+    const fullURL = `${this.baseURL}/${cleanEndpoint}`;
+    
+    // Debug: Log the constructed URL (only in development)
+    if (import.meta.env.DEV) {
+      console.log('🌐 API Request:', {
+        endpoint,
+        baseURL: this.baseURL,
+        fullURL
+      });
+    }
+    
+    return fullURL;
   }
 
   /**
@@ -81,13 +92,35 @@ class ApiClient {
   /**
    * Handle API response
    */
-  private async handleResponse<T>(response: Response): Promise<ApiResponse<T>> {
-    const data = await response.json();
+  private async handleResponse<T>(response: Response, url: string): Promise<ApiResponse<T>> {
+    // Log error details for debugging
+    if (!response.ok) {
+      console.error('❌ API Error:', {
+        url,
+        status: response.status,
+        statusText: response.statusText,
+        baseURL: this.baseURL
+      });
+    }
+
+    let data;
+    try {
+      data = await response.json();
+    } catch (e) {
+      // If response is not JSON, create error response
+      const text = await response.text();
+      console.error('❌ API Response is not JSON:', {
+        url,
+        status: response.status,
+        responseText: text.substring(0, 200)
+      });
+      throw new Error(`API returned non-JSON response (${response.status}): ${text.substring(0, 100)}`);
+    }
 
     if (!response.ok) {
       const error: ApiError = {
         success: false,
-        message: data.message || 'An error occurred',
+        message: data.message || `API request failed: ${response.status} ${response.statusText}`,
         errors: data.errors,
       };
       throw error;
@@ -121,51 +154,55 @@ class ApiClient {
       headers: this.getHeaders(),
     });
 
-    return this.handleResponse<T>(response);
+    return this.handleResponse<T>(response, url);
   }
 
   /**
    * Make POST request
    */
   async post<T>(endpoint: string, body?: any): Promise<ApiResponse<T>> {
-    const response = await fetch(this.buildURL(endpoint), {
+    const url = this.buildURL(endpoint);
+    const response = await fetch(url, {
       method: 'POST',
       headers: this.getHeaders(),
       body: body ? JSON.stringify(body) : undefined,
     });
 
-    return this.handleResponse<T>(response);
+    return this.handleResponse<T>(response, url);
   }
 
   /**
    * Make PUT request
    */
   async put<T>(endpoint: string, body?: any): Promise<ApiResponse<T>> {
-    const response = await fetch(this.buildURL(endpoint), {
+    const url = this.buildURL(endpoint);
+    const response = await fetch(url, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: body ? JSON.stringify(body) : undefined,
     });
 
-    return this.handleResponse<T>(response);
+    return this.handleResponse<T>(response, url);
   }
 
   /**
    * Make DELETE request
    */
   async delete<T>(endpoint: string): Promise<ApiResponse<T>> {
-    const response = await fetch(this.buildURL(endpoint), {
+    const url = this.buildURL(endpoint);
+    const response = await fetch(url, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
 
-    return this.handleResponse<T>(response);
+    return this.handleResponse<T>(response, url);
   }
 
   /**
    * Upload file (multipart/form-data)
    */
   async upload<T>(endpoint: string, formData: FormData): Promise<ApiResponse<T>> {
+    const url = this.buildURL(endpoint);
     const headers: HeadersInit = {};
 
     // Add authorization header if token exists
@@ -174,13 +211,13 @@ class ApiClient {
     }
 
     // Don't set Content-Type for FormData - browser will set it with boundary
-    const response = await fetch(this.buildURL(endpoint), {
+    const response = await fetch(url, {
       method: 'POST',
       headers,
       body: formData,
     });
 
-    return this.handleResponse<T>(response);
+    return this.handleResponse<T>(response, url);
   }
 }
 
